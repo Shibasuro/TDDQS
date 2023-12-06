@@ -1,2 +1,2 @@
 # TNQS
-Masters project repository - provisional
+Tensor Network Quantum Simulation project
