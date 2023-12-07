@@ -1,15 +1,36 @@
 #include <iostream>
-#include <Eigen/Dense>
+#include <complex>
+#define _USE_MATH_DEFINES
+#include <math.h>
+#include <xtensor/xarray.hpp>
+#include <xtensor/xio.hpp>
+#include <xtensor/xview.hpp>
+#include <vector>
+#include <xtensor-blas/xlinalg.hpp>
+#include "simulator.hpp"
  
-using Eigen::MatrixXd;
-using Eigen::VectorXd;
+
  
 int main()
 {
-  MatrixXd m = MatrixXd::Random(3,3);
-  m = (m + MatrixXd::Constant(3,3,1.2)) * 50;
-  std::cout << "m =" << std::endl << m << std::endl;
-  VectorXd v(3);
-  v << 1, 2, 3;
-  std::cout << "m * v =" << std::endl << m * v << std::endl;
+
+    uint32_t num_nodes = 5;
+    
+    TN_Arch MPS = MPS_Arch(num_nodes);
+
+    Circuit circ = Circuit();
+    Simulator sim(&MPS, &circ);
+
+    Gate h(&hadamard_gate, true);
+    sim.apply_squbit_gate(0, h);
+    Gate t(&t_gate, true);
+    sim.apply_squbit_gate(0, t);
+    Gate pauli_x(&pauli_x_gate, true);
+    sim.apply_squbit_gate(0, pauli_x);
+    Gate pauli_y(&pauli_y_gate, true);
+    sim.apply_squbit_gate(0, pauli_y);
+    Gate pauli_z(&pauli_z_gate, true);
+    sim.apply_squbit_gate(0, pauli_z);
+
+    return 0;
 }
