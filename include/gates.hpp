@@ -1,92 +1,69 @@
 #ifndef QGATES
 #define QGATES
-#include <Eigen/Dense>
 #include <complex>
 #include <math.h>
 
-typedef std::complex<double> cd;
-using Eigen::Matrix2cd;
-using Eigen::Vector2cd;
-using Eigen::Matrix4cd;
-using Eigen::Vector4cd;
+typedef std::complex<long double> cd;
+using namespace xt;
 
 // Non-parametric single qubit gates
 
-Matrix2cd pauli_x_gate() {
-    Matrix2cd pauli_y; 
-    pauli_y << cd(0,0), cd(1, 0), cd(1, 0), cd(0,0);
-    return pauli_y;
+xarray<cd> pauli_x_gate() {
+    return {{cd(0,0),cd(1,0)}, {cd(1,0), cd(0,0)}};
 }
 
-Matrix2cd pauli_y_gate() {
-    Matrix2cd pauli_y; 
-    pauli_y << cd(0,0), cd(0, -1), cd(0, -1), cd(0,0);
-    return pauli_y;
+xarray<cd> pauli_y_gate() {
+    return {{cd(0,0), cd(0, -1)}, {cd(0, -1), cd(0,0)}};
 }
 
-Matrix2cd pauli_z_gate() {
-    Matrix2cd pauli_z; 
-    pauli_z << cd(1,0), cd(0, 0), cd(0, 0), cd(-1,0);
-    return pauli_z;
+xarray<cd> pauli_z_gate() {
+    return {{cd(1,0), cd(0, 0)}, {cd(0, 0), cd(-1,0)}};
 }
 
-Matrix2cd hadamard_gate() {
-    Matrix2cd hadamard;
-    double r2 = pow(2, 0.5);
-    hadamard << cd(r2, 0), cd(r2, 0), cd(r2, 0), cd(-r2, 0);
-    return hadamard;
+xarray<cd> hadamard_gate() {
+    double r2 = pow(2, -0.5);
+    return {{cd(r2, 0), cd(r2, 0)}, {cd(r2, 0), cd(-r2, 0)}};
 }
 
-Matrix2cd phase_gate() {
-    Matrix2cd phase;
-    phase << cd(1,0), cd(0,0), cd(0,0), cd(0,1);
-    return phase;
+xarray<cd> phase_gate() {
+    return {{cd(1,0), cd(0,0)}, {cd(0,0), cd(0,1)}};
 }
 
-Matrix2cd t_gate() {
-    Matrix2cd t;
-    double r22 = pow(2, 0.5) / 2.0;
-    t << cd(1,0), cd(0,0), cd(0,0), cd(r22,r22);
-    return t;
+xarray<cd> t_gate() {
+    double r2 = pow(2, -0.5);
+    return {{cd(1,0), cd(0,0)}, {cd(0,0), cd(r2,r2)}};
 }
 
 // Parametric single qubit gates
 
-Matrix2cd phase_shift_gate(double theta) {
-    Matrix2cd phase_shift;
+xarray<cd> phase_shift_gate(double theta) {
     double r = cos(theta);
     double i = sin(theta);
-    phase_shift << cd(1,0), cd(0,0), cd(0,0), cd(r, i);
-    return phase_shift;
+    return {{cd(1,0), cd(0,0)}, {cd(0,0), cd(r, i)}};
 }
 
-Matrix2cd rx_gate(double theta) {
-    Matrix2cd rx;
+xarray<cd> rx_gate(double theta) {
     double c = cos(theta/2);
     double s = sin(theta/2);
-    rx << cd(c,0), cd(0,-s), cd(0, -s), (c, 0);
-    return rx;
+    return {{cd(c,0), cd(0,-s)}, {cd(0, -s), (c, 0)}};
 }
 
-Matrix2cd ry_gate(double theta) {
-    Matrix2cd ry;
+xarray<cd> ry_gate(double theta) {
     double c = cos(theta/2);
     double s = sin(theta/2);
-    ry << cd(c,0), cd(-s, 0), cd(s, 0), (c, 0);
-    return ry;
+    return {{cd(c,0), cd(-s, 0)}, {cd(s, 0), (c, 0)}};
 }
 
-Matrix2cd rz_gate(double theta) {
-    Matrix2cd rz;
+xarray<cd> rz_gate(double theta) {
     double c = cos(theta/2);
     double s = sin(theta/2);
-    rz << cd(c, -s), cd(0,0), cd(0,0), cd(c, s);
-    return rz;
+    return {{cd(c, -s), cd(0,0)}, {cd(0,0), cd(c, s)}};
 }
 
 // simulates OpenQASM U gate - arbitrary single-qubit rotation
-Matrix2cd u_gate(double theta, double phi, double lambda) {
-    Matric2cd u;
+
+xarray<cd> u_gate(double theta, double phi, double lambda) {
+    xarray<cd> u;
     double c = cos(theta/2);
     double s = sin(theta/2);
     double cp = cos(phi);
@@ -95,13 +72,32 @@ Matrix2cd u_gate(double theta, double phi, double lambda) {
     double sl = sin(lambda);
     double clp = cos(lambda + phi);
     double slp = sin(lambda + phi);
-    u << cd(c, 0), cd(-s * cl, -s * -sl), cd(s * cp, s * -sp), cd(c * clp, c * slp);
-    return u;
+    return {{cd(c, 0), cd(-s * cl, -s * -sl)}, {cd(s * cp, s * -sp), cd(c * clp, c * slp)}};
 }
-
 
 // Non-parametric two qubit gates
 
-// Parametric two qubit gates
+xarray<cd> controlled_not_gate() {
+    xarray<cd> controlled_not = zeros<cd>({4,4});
+    controlled_not(0,0) = cd(1,0);
+    controlled_not(1,1) = cd(1,0);
+    controlled_not(2,3) = cd(1,0);
+    controlled_not(3,2) = cd(1,0);
+    return controlled_not;
+}
+
+xarray<cd> controlled_z_gate() {
+    xarray<cd> controlled_z = zeros<cd>({4,4});
+    controlled_z(0,0) = cd(1,0);
+    controlled_z(1,1) = cd(1,0);
+    controlled_z(2,2) = cd(1,0);
+    controlled_z(3,3) = cd(-1,0);
+    return controlled_z;
+}
+
+// may need to do swap gate here at some point
+
+
+// Parametric two qubit gates (not needed for universal quantum computation but may be worth playing with)
 
 #endif

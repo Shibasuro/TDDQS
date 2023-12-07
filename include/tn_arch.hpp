@@ -16,6 +16,9 @@ class TN_Node {
         add_neighbour(const uint32_t neighbour) {
             neighbours.push_back(neighbour)
         }
+        uint32_t degree() {
+            return neighbours.size();
+        }
 }
 
 class TN_Arch {
@@ -38,6 +41,9 @@ class TN_Arch {
         TN_Arch(const uint32_t num_nodes, const vector<pair<uint32_t, uint32_t>> edges) {
             nnodes = num_nodes;
             compute_neighbours(edges);
+        }
+        vector<TN_Node> get_nodes() {
+            return nodes;
         }
 
 }
