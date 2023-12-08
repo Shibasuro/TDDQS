@@ -19,6 +19,16 @@ class TN_Node {
         uint32_t degree() {
             return neighbours.size();
         }
+        vector<uint32_t> get_neighbours() {
+            return neighbours;
+        }
+        uint32_t get_index(uint32_t target_node) {
+            auto it = find(neighbours.begin(), neighbours.end(), target_node);
+            if (it != neighbours.end()) {
+                return it - neighbours.begin();
+            }
+            return -1;
+        }
 };
 
 class TN_Arch {
@@ -47,6 +57,12 @@ class TN_Arch {
         }
         vector<TN_Node> get_nodes() {
             return nodes;
+        }
+        TN_Node get_node(uint32_t nindex) {
+            return nodes[nindex];
+        }
+        uint32_t size() {
+            return nodes.size();
         }
         
 
