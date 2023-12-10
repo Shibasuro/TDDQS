@@ -3,12 +3,10 @@
 #include <vector>
 #include <utility>
 
-using namespace std;
-
 class TN_Node {
     private:
         uint32_t nindex;
-        vector<uint32_t> neighbours;
+        std::vector<uint32_t> neighbours;
     public:
         TN_Node(const uint32_t &node_index) {
             nindex = node_index;
@@ -19,7 +17,7 @@ class TN_Node {
         uint32_t degree() {
             return neighbours.size();
         }
-        vector<uint32_t> get_neighbours() {
+        std::vector<uint32_t> get_neighbours() {
             return neighbours;
         }
         uint32_t get_index(uint32_t target_node) {
@@ -27,20 +25,20 @@ class TN_Node {
             if (it != neighbours.end()) {
                 return it - neighbours.begin();
             }
-            return -1;
+            return degree();
         }
 };
 
 class TN_Arch {
     private:
         uint32_t nnodes;
-        vector<TN_Node> nodes;
-        void compute_neighbours(const vector<pair<uint32_t, uint32_t>> &edges) {
+        std::vector<TN_Node> nodes;
+        void compute_neighbours(const std::vector<std::pair<uint32_t, uint32_t>> &edges) {
             for (uint32_t i = 0; i < nnodes; i++) {
                 TN_Node new_node(i);
                 nodes.push_back(new_node);
             }
-            for (pair<uint32_t, uint32_t> e : edges) {
+            for (std::pair<uint32_t, uint32_t> e : edges) {
                 uint32_t i = e.first;
                 uint32_t j = e.second;
                 nodes[i].add_neighbour(j);
@@ -51,11 +49,11 @@ class TN_Arch {
         TN_Arch() {
             
         }
-        TN_Arch(const uint32_t &num_nodes, const vector<pair<uint32_t, uint32_t>> &edges) {
+        TN_Arch(const uint32_t &num_nodes, const std::vector<std::pair<uint32_t, uint32_t>> &edges) {
             nnodes = num_nodes;
             compute_neighbours(edges);
         }
-        vector<TN_Node> get_nodes() {
+        std::vector<TN_Node> get_nodes() {
             return nodes;
         }
         TN_Node get_node(uint32_t nindex) {
@@ -69,9 +67,9 @@ class TN_Arch {
 };
 
 TN_Arch MPS_Arch(uint32_t num_nodes) {
-    vector<pair<uint32_t, uint32_t>> edges;
+    std::vector<std::pair<uint32_t, uint32_t>> edges;
     for (uint32_t i = 0; i < num_nodes - 1; i++) {
-        edges.push_back(pair<uint32_t, uint32_t>(i, i + 1));
+        edges.push_back(std::pair<uint32_t, uint32_t>(i, i + 1));
     }
     return TN_Arch(num_nodes, edges);
 }

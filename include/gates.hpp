@@ -4,9 +4,8 @@
 #include <math.h>
 #include <vector>
 
-typedef std::complex<long double> cd;
+typedef std::complex<double> cd;
 using namespace xt;
-using namespace std;
 
 // Non-parametric single qubit gates
 
@@ -38,28 +37,28 @@ xarray<cd> t_gate() {
 
 // Parametric single qubit gates
 
-xarray<cd> phase_shift_gate(vector<double> &params) {
+xarray<cd> phase_shift_gate(std::vector<double> &params) {
     double theta = params[0];
     double r = cos(theta);
     double i = sin(theta);
     return {{cd(1,0), cd(0,0)}, {cd(0,0), cd(r, i)}};
 }
 
-xarray<cd> rx_gate(vector<double> &params) {
+xarray<cd> rx_gate(std::vector<double> &params) {
     double theta = params[0];
     double c = cos(theta/2);
     double s = sin(theta/2);
     return {{cd(c,0), cd(0,-s)}, {cd(0, -s), cd(c, 0)}};
 }
 
-xarray<cd> ry_gate(vector<double> &params) {
+xarray<cd> ry_gate(std::vector<double> &params) {
     double theta = params[0];
     double c = cos(theta/2);
     double s = sin(theta/2);
     return {{cd(c,0), cd(-s, 0)}, {cd(s, 0), cd(c, 0)}};
 }
 
-xarray<cd> rz_gate(vector<double> &params) {
+xarray<cd> rz_gate(std::vector<double> &params) {
     double theta = params[0];
     double c = cos(theta/2);
     double s = sin(theta/2);
@@ -68,7 +67,7 @@ xarray<cd> rz_gate(vector<double> &params) {
 
 // simulates OpenQASM U gate - arbitrary single-qubit rotation
 
-xarray<cd> u_gate(vector<double> &params) {
+xarray<cd> u_gate(std::vector<double> &params) {
     double theta = params[0];
     double phi = params[1];
     double lambda = params[2];

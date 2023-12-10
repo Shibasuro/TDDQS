@@ -5,7 +5,6 @@
 #include "xtensor/xarray.hpp"
 
 using namespace xt;
-using namespace std;
 
 class Gate {
     private:
@@ -14,9 +13,9 @@ class Gate {
         bool has_params;
         union Gate_Function {
             xarray<cd> (*gate_builder_no_params)();
-            xarray<cd> (*gate_builder_with_params)(vector<double>);
+            xarray<cd> (*gate_builder_with_params)(std::vector<double>);
         } gate_builder;
-        vector<double> gate_params;
+        std::vector<double> gate_params;
 
     public:
         Gate(xarray<cd> (*gate_function)(), const bool &s) {
@@ -24,7 +23,7 @@ class Gate {
             has_params = false;
             gate_builder.gate_builder_no_params = gate_function;
         }
-        Gate(xarray<cd> (*gate_function)(vector<double>), const bool &s, const vector<double> &params) {
+        Gate(xarray<cd> (*gate_function)(std::vector<double>), const bool &s, const std::vector<double> &params) {
             single = s;
             has_params = true;
             gate_params = params;
@@ -54,7 +53,7 @@ class Instruction {
 class Circuit {
     private:
         uint32_t num_qubits;
-        vector<Instruction> instructions;
+        std::vector<Instruction> instructions;
     
     public:
         Circuit() {
