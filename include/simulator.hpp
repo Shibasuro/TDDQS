@@ -2,12 +2,16 @@
 #define QSIM
 #include "tn_arch.hpp"
 #include "circuit.hpp"
-#include <xtensor-blas/xlinalg.hpp>
 #include <set>
+#include <xtensor-blas/xlinalg.hpp>
+// for views 
+#include <xtensor/xview.hpp>
+#include <xtensor/xstrided_view.hpp>
+// for randomisation
+#include <random>
 
 //temporary for output
 #include <xtensor/xio.hpp>
-#include <xtensor/xview.hpp>
 #include <iostream>
 
 using namespace xt;
@@ -35,6 +39,9 @@ class Simulator {
         std::vector<xarray<cd>> gamma;
         std::vector<uint32_t> contraction_order;
 
+        // random setup
+        std::default_random_engine generator;
+
         void setup_tensors() {
             for (TN_Node node : architecture->get_nodes()) {
                 xarray<cd> arr{cd(1,0), cd(0,0)};
@@ -45,6 +52,10 @@ class Simulator {
                 arr.reshape(shape);
                 gamma.push_back(arr);
             }
+        }
+        double uniform_rand_in_range(double min, double max) {
+            std::uniform_real_distribution<double> distribution(min, max);
+            return distribution(generator);
         }
 
         void apply_single_qubit_gate(const uint32_t &qubit, Gate &gate) {
@@ -222,8 +233,15 @@ class Simulator {
             gamma[qubit2] = transpose(gamma2, calculate_inverse_transpose(dim2, q2_to_q1_bond_index));\
         }
 
-        void apply_instruction() {
-
+        void apply_instruction(Instruction instruction) {
+            switch(instruction.get_type()) {
+                case Instr_type::GATE:
+                    break;
+                case Instr_type::MEASUREMENT:
+                    break;
+                case Instr_type::COLLAPSE:
+                    break;
+            }
         }
 
         void collapse() {
@@ -239,9 +257,11 @@ class Simulator {
             architecture = arch;
             circuit = circ;
             setup_tensors();
+            // default contraction order
             for (uint32_t i = 0; i < architecture->size(); i++) {
                 contraction_order.push_back(i);
             }
+            generator.seed(time(NULL));
         }
 
         void simulate() {
@@ -314,10 +334,107 @@ class Simulator {
             return amalgam(0);
         }
 
-        long double get_probability(std::vector<uint32_t> &target_bitstring) {
+        double get_probability(std::vector<uint32_t> &target_bitstring) {
             cd amplitude = get_amplitude(target_bitstring);
             return std::real(amplitude * std::conj(amplitude));
         }
+
+        // returns probability of qubit being equal to value when measured
+        double get_qubit_probability(const uint32_t &qubit, const uint32_t value) {
+            // given order 0-1-2-3-4, contract from 0 to 1, then contract from 01 to 2, contract from 012 to 3, and so on
+            uint32_t first_index = contraction_order[0];
+            TN_Node first_node = get_node(first_index);
+            // amalgam contains the current state of the contracted part, ready to contract its edges with the next node in the order
+            xarray<cd> amalgam = gamma[first_index];
+
+            std::set<uint32_t> amalgamated_nodes;
+            amalgamated_nodes.insert(first_index);
+            // edges_to_contract contains the edges going into the contracted component that have not yet been contracted
+            std::vector<std::pair<uint32_t, uint32_t>> edges_to_contract;
+            for (uint32_t target : first_node.get_neighbours()) {
+                edges_to_contract.push_back(std::pair<uint32_t, uint32_t>(first_index, target));
+            }
+            for (uint32_t i = 1; i < contraction_order.size(); i++) {
+                uint32_t current_index = contraction_order[i];
+                TN_Node current_node = get_node(current_index);
+
+                std::vector<uint32_t> new_neighbours = current_node.get_neighbours();
+
+                std::vector<size_t> amalgam_axes;
+                std::vector<size_t> current_node_axes;
+
+                // Graph is simple, so should not have problems with multiple edges between two nodes
+                for (uint32_t j = 0; j < edges_to_contract.size(); j++) {
+                    // each edge which targets the current index is an edge we must contract at this step
+                    if (edges_to_contract[j].second == current_index) {
+                        // need to record indices of edges now that we have found the ones to contract
+                        amalgam_axes.push_back(1 + j);
+                        // calculate current_node index for this edge
+                        current_node_axes.push_back(1 + current_node.get_index(edges_to_contract[j].first));
+                    }
+                }
+                // second loop to remove edges which we have marked to contract
+                for (size_t j : amalgam_axes) {
+                    // removes edges that we have processed from edges to contract
+                    std::vector<std::pair<uint32_t, uint32_t>>::iterator new_end = remove(edges_to_contract.begin(), edges_to_contract.end(), edges_to_contract[j]);
+                    edges_to_contract.erase(new_end, edges_to_contract.end());
+                }
+
+                // carry out the contraction for this step between amalgam and the current node, need to compute axes to contract over
+                // for amalgam, these axes are the j's above?
+                // for current node, these axes are the position of each source node in the vector of neighbours
+                xarray<cd> target = gamma[current_index];
+
+                amalgam = linalg::tensordot(amalgam, target, amalgam_axes, current_node_axes);
+
+                // Update the state of the set to keep track of new nodes that has been contracted into amalgam
+                // new edges only added if they are to a node not yet contracted into the amalgam
+                for (uint32_t target : new_neighbours) {
+                    if (amalgamated_nodes.find(target) == amalgamated_nodes.end()) {
+                        edges_to_contract.push_back(std::pair<uint32_t, uint32_t>(current_index, target));
+                    }
+                }
+                amalgamated_nodes.insert(current_index);
+
+            }
+
+            // return std::real(sum(amalgam * conj(amalgam))(0));
+
+            amalgam = amalgam * conj(amalgam);
+
+            xstrided_slice_vector slices;
+            for (uint32_t i = 0; i < architecture->size(); i++) {
+                if (i == qubit) {
+                    slices.push_back(value);
+                }
+                else {
+                    slices.push_back(all());
+                }
+            }
+
+            amalgam = strided_view(amalgam, slices);
+
+            return std::real(sum(amalgam)(0));
+        }
+
+        // measures the qubit, setting its value based on the probability that it should be 0 or 1
+        void measure(uint32_t qubit) {
+            double p0 = get_qubit_probability(qubit, 0);
+            double rand_val = uniform_rand_in_range(0.0, 1.0);
+            if (rand_val <= p0) {
+                // then we have measured a 0, so update gamma accordingly
+                std::vector<double> p0_v({p0});
+                Gate update_gate(&update_to_0, true, &p0_v);
+                apply_single_qubit_gate(qubit, update_gate);
+            }
+            else {
+                // otherwise we have measured a 1, so update gamma accordingly
+                std::vector<double> p1_v({1 - p0});
+                Gate update_gate(&update_to_1, true, &p1_v);
+                apply_single_qubit_gate(qubit, update_gate);
+            }
+        }
+        
 };
 
 #endif
