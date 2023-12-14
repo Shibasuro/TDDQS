@@ -58,7 +58,7 @@ class Simulator {
             return distribution(generator);
         }
 
-        void apply_single_qubit_gate(const uint32_t &qubit, Gate &gate) {
+        void apply_single_qubit_gate(const uint32_t &qubit, Gate gate) {
             gamma[qubit] = linalg::tensordot(gate.get_gate(), gamma[qubit], 1);
         }
 
@@ -127,7 +127,7 @@ class Simulator {
         // 7. Recompute temporarily gamma[qubit1] = Q1R1', gamma[qubit2] = Q2R2'
         // 8. Rearrange linked indices back into place to set final gammas
         
-        void apply_two_qubit_gate(const uint32_t &qubit1, const uint32_t &qubit2, Gate &gate) {
+        void apply_two_qubit_gate(const uint32_t &qubit1, const uint32_t &qubit2, Gate gate) {
             // if the two qubits are not adjacent, do nothing for now, in future may consider swapping them into position?
             // Alternatively, assume swaps are coded as gates into the circuit when they are required
             // index of q2 in q1's list of neighbouring nodes and vice versa
@@ -236,10 +236,17 @@ class Simulator {
         void apply_instruction(Instruction instruction) {
             switch(instruction.get_type()) {
                 case Instr_type::GATE:
+                    if (instruction.get_gate().is_single_qubit_gate()) {
+                        apply_single_qubit_gate(instruction.get_q1(), instruction.get_gate());
+                    }
+                    else {
+                        apply_two_qubit_gate(instruction.get_q1(), instruction.get_q2(), instruction.get_gate());
+                    }
                     break;
                 case Instr_type::MEASUREMENT:
+                    measure(instruction.get_q1());
                     break;
-                case Instr_type::COLLAPSE:
+                default:
                     break;
             }
         }
@@ -265,7 +272,9 @@ class Simulator {
         }
 
         void simulate() {
-            
+            for (Instruction instr : circuit->get_instructions()) {
+                apply_instruction(instr);
+            }
         }
         
         void apply_squbit_gate(const uint32_t &qubit, Gate &gate) {
