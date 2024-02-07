@@ -112,6 +112,15 @@ xarray<cd> controlled_z_gate() {
     return controlled_z;
 }
 
+xarray<cd> swap_gate() {
+    xarray<cd> swap = zeros<cd>({4,4});
+    swap(0,0) =  cd(1,0);
+    swap(1,2) =  cd(1,0);
+    swap(2,1) =  cd(1,0);
+    swap(3,3) =  cd(1,0);
+    return swap;
+}
+
 // may need to do swap gate here at some point
 
 
