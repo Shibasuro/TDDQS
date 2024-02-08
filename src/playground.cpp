@@ -89,8 +89,8 @@ void tdd_playground() {
         }
     }
 
-    std::cout << "nodes: " << cache_map.num_nodes() << std::endl;
-    std::cout << "edges: " << cache_map.num_nodes() << std::endl;
+    std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
+    std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;
 }
 
 int main()
