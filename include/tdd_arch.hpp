@@ -184,8 +184,7 @@ class TDD_Map {
         }
 
         size_t num_unique_nodes() {
-            // adds 1 to include the terminal node
-            return node_map.size() + 1;
+            return node_map.size();
         }
 
         size_t num_unique_edges() {
