@@ -11,6 +11,8 @@
 #include "simulator.hpp"
 #include "tdd_arch.hpp"
 
+TDD_Map cache_map;
+
 void tn_test() {
     // squbit gate + amplitude test
     std::cout << "single qubit gate superposition test" << std::endl;
@@ -86,6 +88,9 @@ void tdd_playground() {
             std::cout << tdd.get_value({i,j}) << std::endl;
         }
     }
+
+    std::cout << "nodes: " << cache_map.num_nodes() << std::endl;
+    std::cout << "edges: " << cache_map.num_nodes() << std::endl;
 }
 
 int main()
