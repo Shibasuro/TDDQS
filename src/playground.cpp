@@ -89,16 +89,30 @@ void tdd_playground() {
     gate(2,2) = cd(1,0);
     gate(3,3) = cd(1,0);
     gate(3,0) = cd(1,0);
+    gate.reshape({2,2,4});
     TDD tdd = convert_tensor_to_TDD(gate);
     std::cout << gate << std::endl;
 
     bool valid = true;
+    // for rank 2
+    // for (uint32_t i = 0; i < gate.shape()[0]; i++) {
+    //     for (uint32_t j = 0; j < gate.shape()[1]; j++) {
+    //         cd value = tdd.get_value({i,j});
+    //         std::cout << value << std::endl;
+    //         if (value != gate(i,j)) {
+    //             valid = false;
+    //         }
+    //     }
+    // }
+
     for (uint32_t i = 0; i < gate.shape()[0]; i++) {
         for (uint32_t j = 0; j < gate.shape()[1]; j++) {
-            cd value = tdd.get_value({i,j});
-            std::cout << value << std::endl;
-            if (value != gate(i,j)) {
-                valid = false;
+            for (uint32_t k = 0; k < gate.shape()[2]; k++) {
+                cd value = tdd.get_value({i,j,k});
+                std::cout << value << std::endl;
+                if (value != gate(i,j,k)) {
+                    valid = false;
+                }
             }
         }
     }

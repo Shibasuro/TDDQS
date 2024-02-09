@@ -224,6 +224,9 @@ class TDD_Map {
         size_t num_unique_edges() {
             return edge_map.size();
         }
+        
+        // would be nice to be able to estimate memory cost here, idk how though
+        // since nodes can have different numbers of successors, just measuring number of nodes/edges isnt a fair assessment
 
 };
 
