@@ -4,6 +4,7 @@
 #include <iostream>
 #include <queue>
 #include <functional>
+#include <set>
 #include <unordered_map>
 #include "xtensor/xarray.hpp"
 #include <xtensor/xstrided_view.hpp>
@@ -41,6 +42,14 @@ class TDD_Node {
         uint8_t axis_index;
         std::vector<const TDD_Edge *> successors;
 
+        // trade off between maintaining full vector of successors (dimension * 64 bits)
+        // and grouping indices to store less pointers (which would require d' * MAX_INDEX_SIZE * 64 bits)
+        // MAX_INDEX_SIZE would be the number of bits required to store the max dimension (probably 16 bits)
+        // d' is the number of distinct successors
+        // thus unless there is massive redundancy, not necessarily valuable
+        // Reduction rule 5 involves storing the edges (thus reducing number of complex values stored)
+        // This would be the possible reduction rule 5 (where edges are fully merged, instead of partial merged)
+
     public:
 
         TDD_Node(){}
@@ -60,7 +69,7 @@ class TDD_Node {
             return axis_index;
         }
 
-        void add_successor(const TDD_Node *t, cd &w);
+        const TDD_Edge *add_successor(const TDD_Node *t, cd &w);
 
         std::vector<const TDD_Edge *> get_successors() const {
             return successors;
@@ -195,10 +204,11 @@ class TDD_Map {
 
 extern TDD_Map cache_map;
 
-inline void TDD_Node::add_successor(const TDD_Node *t, cd &w) {
+inline const TDD_Edge *TDD_Node::add_successor(const TDD_Node *t, cd &w) {
     TDD_Edge new_edge(t, w);
     const TDD_Edge *new_edge_ptr = cache_map.add_edge(new_edge);
     successors.push_back(new_edge_ptr);
+    return new_edge_ptr;
 }
 
 class TDD {
@@ -251,6 +261,7 @@ TDD convert_tensor_to_TDD(xarray<cd> tensor, uint32_t axis = 0) {
     // fill up successors of current node, applying normalisation in the process
     cd weight = 1;
     cd normalisation_weight = 0;
+    std::set<const TDD_Edge *> new_edge_set;
     for (size_t i = 0; i < dimension; i++) {
         sv[0] = i;
         xarray<cd> new_tensor = strided_view(tensor, sv);
@@ -270,11 +281,15 @@ TDD convert_tensor_to_TDD(xarray<cd> tensor, uint32_t axis = 0) {
             normalisation_weight = next_weight;
             next_weight = 1;
         }
-        new_node.add_successor(next_node, next_weight);
+        // use of the unordered_map to store new nodes and edges implements RR4
+        // as each unique node is only stored once
+        // also stores new edge in a map to check if edges are all the same
+        new_edge_set.insert(new_node.add_successor(next_node, next_weight));
     }
     weight *= normalisation_weight;
 
     // apply reductions
+    // RR2 - redirect weight 0 edge to terminal 
     // if weight is 0, then node is just the terminal node with in_weight 0
     // does this need approximate equality?
     if (weight == cd(0,0)) {
@@ -286,16 +301,22 @@ TDD convert_tensor_to_TDD(xarray<cd> tensor, uint32_t axis = 0) {
         return TDD(cache_map.get_terminal_node(), 0);
     }
 
-    
-
-    // reduce successors
-    // Need to apply RR3 and RR4 here
     // RR3 - need to check new node to see if all successors are the same and have the same weights
-    // RR4 - need to check if two successors are identical, if so, merge them
-    
-    // Also need to apply new reduction rule RR5 - thanks to the pointer setup, if weights are different,
-    // but nodes the same then merge should not be an issue
-    // if two successors are the same 
+    if (new_edge_set.size() == 1) {
+        // if all the successors are the same, then that means we do not need this node, instead
+        // direct the tdd to the successor node with the in weight
+        // that means the other successors need to be deleted as well (they are identical to the first anyway)
+        for (size_t i = 1; i < dimension; i++) {
+            cache_map.remove_edge_ref(new_node.get_successor_ref(i));
+        }
+        const TDD_Node *new_node_ptr = new_node.get_successor_ref(0)->get_target();
+        // delete the last old edge
+        cache_map.remove_edge_ref(new_node.get_successor_ref(0));
+
+        return TDD(new_node_ptr, weight);
+    }
+
+    // otherwise, the new node is now reduced and we can add it to the map
 
     const TDD_Node *new_node_ptr = cache_map.add_node(new_node);
 

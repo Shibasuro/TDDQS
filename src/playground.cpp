@@ -79,7 +79,8 @@ void tn_test() {
 }
 
 void tdd_playground() {
-    xarray<cd> gate = controlled_z_gate();
+    // xarray<cd> gate = controlled_z_gate();
+    xarray<cd> gate = ones<cd>({4,4});
     TDD tdd = convert_tensor_to_TDD(gate);
     std::cout << gate << std::endl;
 
