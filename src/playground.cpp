@@ -80,15 +80,29 @@ void tn_test() {
 
 void tdd_playground() {
     // xarray<cd> gate = controlled_z_gate();
-    xarray<cd> gate = ones<cd>({4,4});
+    xarray<cd> gate = zeros<cd>({4,4});
+    gate(0,0) = cd(1,0);
+    gate(2,1) = cd(1,0);
+    gate(1,2) = cd(1,0);
+    gate(3,1) = cd(1,0);
+    gate(0,3) = cd(1,0);
+    gate(2,2) = cd(1,0);
+    gate(3,3) = cd(1,0);
+    gate(3,0) = cd(1,0);
     TDD tdd = convert_tensor_to_TDD(gate);
     std::cout << gate << std::endl;
 
+    bool valid = true;
     for (uint32_t i = 0; i < gate.shape()[0]; i++) {
         for (uint32_t j = 0; j < gate.shape()[1]; j++) {
-            std::cout << tdd.get_value({i,j}) << std::endl;
+            cd value = tdd.get_value({i,j});
+            std::cout << value << std::endl;
+            if (value != gate(i,j)) {
+                valid = false;
+            }
         }
     }
+    std::cout << "Validity: " << valid << std::endl;
 
     std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
     std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;

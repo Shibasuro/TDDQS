@@ -43,12 +43,29 @@ class TDD_Node {
         std::vector<const TDD_Edge *> successors;
 
         // trade off between maintaining full vector of successors (dimension * 64 bits)
-        // and grouping indices to store less pointers (which would require d' * MAX_INDEX_SIZE * 64 bits)
+        // and maintaining a vector of indices (mapping real index to successor index)
+        // which would require space d * MAX_INDEX_SIZE + d' * 64 (assuming 64 bit pointers)
         // MAX_INDEX_SIZE would be the number of bits required to store the max dimension (probably 16 bits)
         // d' is the number of distinct successors
-        // thus unless there is massive redundancy, not necessarily valuable
-        // Reduction rule 5 involves storing the edges (thus reducing number of complex values stored)
-        // This would be the possible reduction rule 5 (where edges are fully merged, instead of partial merged)
+        // d' = (p/q)d, p < q
+        // so space is 16d + 64(p/q)d vs 64d
+        // (p/q) < 3/4
+        // exact memory saving = 16 * (3d - 4d') bits, this means we do not save memory if d' > 3/4d
+        // worst case cost is then 5/4 * original cost (when d = d')
+        // this requires quite a bit of redundancy, but also enables more redundancy exploitation
+
+        // unlocks the potential for index vectors and successor vectors to be hash mapped
+
+        // alternative approach would require the below:
+        // std::vector<uint16_t> successor_indices;
+        // std::vector<const TDD_Edge *> successors;
+        // in addition to updating any weight retrieval, successor addition, successor retrieval
+        // and deletion
+
+
+        // Reduction rule 5 involves eliminating redundant edges 
+        // this approach would reduce the number of pointers stored
+        // duplicate edges are already handled by the edge map
 
     public:
 
@@ -81,12 +98,13 @@ class TDD_Node {
 
         cd get_weight(size_t index) const {
             if (is_terminal()) {
-                return 1;
+                return cd(1,0);
             }
             return successors[index]->get_weight();
         }
+
+        void clear_successors();
         
-        // TODO: need to update this propagation to trim more than 1 index if nodes have been merged
         cd get_value (xarray<size_t> indices) const {
             if (is_terminal()) {
                 return cd(1,0);
@@ -99,8 +117,15 @@ class TDD_Node {
             if (get_weight(current_index) == cd{0,0}) {
                 return cd(0,0);
             }
-            xarray<size_t> new_indices = view(indices, range(1, indices.size()));
-            return get_weight(current_index) * get_successor_ref(current_index)->get_target()->get_value(new_indices);
+            const TDD_Node *next = get_successor_ref(current_index)->get_target();
+            xarray<size_t> new_indices;
+            // if next is not terminal then node merge is relevant
+            if (!next->is_terminal()) {
+                // account for node merge by tracking the axis index
+                uint8_t index_diff = next->get_axis_index() - get_axis_index();
+                new_indices = view(indices, range(index_diff, indices.size()));
+            }
+            return get_weight(current_index) * next->get_value(new_indices);
         }
 
         bool operator==(const TDD_Node &other) const {
@@ -130,18 +155,18 @@ struct std::hash<TDD_Node> {
 class TDD_Map {
     private:
         // maps contain the item itself, and maps to the reference count
-        std::unordered_map<TDD_Edge, uint32_t> edge_map;
-        std::unordered_map<TDD_Node, uint32_t> node_map;
+        std::unordered_map<TDD_Edge, uint16_t> edge_map;
+        std::unordered_map<TDD_Node, uint16_t> node_map;
 
         // unique terminal node is defined here
         TDD_Node terminal_node = TDD_Node();
 
     public:
         // for adding new nodes and edges to the maps, returns pointer to node or edge
-        const TDD_Node *add_node(TDD_Node node) {
+        const TDD_Node *add_node(TDD_Node node, bool instantiating) {
             auto pr = node_map.emplace(node, 0);
             auto it = pr.first;
-            if (!pr.second) {
+            if (!pr.second && !instantiating) {
                 // if it already exists, increment refcount;
                 it->second++;
             }
@@ -150,7 +175,7 @@ class TDD_Map {
         }
 
         const TDD_Edge *add_edge(TDD_Edge edge) {
-            add_node(*(edge.get_target()));
+            add_node(*(edge.get_target()), false);
             auto pr = edge_map.emplace(edge, 1);
             auto it = pr.first;
             if (!pr.second) {
@@ -211,6 +236,12 @@ inline const TDD_Edge *TDD_Node::add_successor(const TDD_Node *t, cd &w) {
     return new_edge_ptr;
 }
 
+inline void TDD_Node::clear_successors() {
+    for (size_t i = 0; i < successors.size(); i++) {
+        cache_map.remove_edge_ref(successors[i]);
+    }
+}
+
 class TDD {
     private: 
         const TDD_Node *root;
@@ -228,7 +259,7 @@ class TDD {
         cd get_weight() const {
             return in_weight;
         }
-        // TODO: need to update this propagation to trim more than 1 index if nodes have been merged
+
         cd get_value(xarray<size_t> indices) const {
             if (root->is_terminal()) {
                 return in_weight;
@@ -236,14 +267,20 @@ class TDD {
             if (in_weight == cd{0,0}) {
                 return 0;
             }
-            xarray<size_t> new_indices = view(indices, range(1, indices.size()));
-            return in_weight * root->get_weight(indices[0]) * root->get_successor_ref(indices[0])->get_target()->get_value(new_indices);
+            const TDD_Node *next = root->get_successor_ref(indices[0])->get_target();
+            xarray<size_t> new_indices;
+            if (!next->is_terminal()) {
+                // account for node merge by tracking the axis index
+                uint32_t index_diff = next->get_axis_index() - root->get_axis_index();
+                new_indices = view(indices, range(index_diff, indices.size()));
+            }
+            return in_weight * root->get_weight(indices[0]) * next->get_value(new_indices);
         }
 
 };
 
 // recursive implementation to convert arbitrary tensor into a TDD
-TDD convert_tensor_to_TDD(xarray<cd> tensor, uint32_t axis = 0) {
+TDD convert_tensor_to_TDD(xarray<cd> tensor, uint8_t axis = 0) {
 
     if (tensor.size() == 1) {
         // if terminal node, then just return trivial TDD with in_weight equal to weight
@@ -294,10 +331,8 @@ TDD convert_tensor_to_TDD(xarray<cd> tensor, uint32_t axis = 0) {
     // does this need approximate equality?
     if (weight == cd(0,0)) {
         // in this case, we also need to delete subnodes as we are replacing current node with terminal
-        for (size_t j = 0; j < new_node.get_dimension(); j++) {
-            // removing edge reference should also eliminate references to the node
-            cache_map.remove_edge_ref(new_node.get_successor_ref(j));
-        }
+        // removing edge reference should also eliminate references to the node
+        new_node.clear_successors();
         return TDD(cache_map.get_terminal_node(), 0);
     }
 
@@ -306,19 +341,17 @@ TDD convert_tensor_to_TDD(xarray<cd> tensor, uint32_t axis = 0) {
         // if all the successors are the same, then that means we do not need this node, instead
         // direct the tdd to the successor node with the in weight
         // that means the other successors need to be deleted as well (they are identical to the first anyway)
-        for (size_t i = 1; i < dimension; i++) {
-            cache_map.remove_edge_ref(new_node.get_successor_ref(i));
-        }
-        const TDD_Node *new_node_ptr = new_node.get_successor_ref(0)->get_target();
-        // delete the last old edge
-        cache_map.remove_edge_ref(new_node.get_successor_ref(0));
+        const TDD_Node next_node = *(new_node.get_successor_ref(0)->get_target());
+        // delete the successors
+        new_node.clear_successors();
+
+        const TDD_Node *new_node_ptr = cache_map.add_node(next_node, true);
 
         return TDD(new_node_ptr, weight);
     }
 
     // otherwise, the new node is now reduced and we can add it to the map
-
-    const TDD_Node *new_node_ptr = cache_map.add_node(new_node);
+    const TDD_Node *new_node_ptr = cache_map.add_node(new_node, true);
 
     return TDD(new_node_ptr, weight);
 }
