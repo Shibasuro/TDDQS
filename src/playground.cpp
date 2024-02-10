@@ -90,27 +90,34 @@ void tdd_playground() {
     gate(3,3) = cd(1,0);
     gate(3,0) = cd(1,0);
     gate.reshape({2,2,4});
-    TDD tdd = convert_tensor_to_TDD(gate);
-    std::cout << gate << std::endl;
+    xarray<cd> g2 = ones<cd>({4,4});
+    g2.reshape({2,2,4});
+    xarray<cd> g3 = controlled_z_gate();
+    g3.reshape({2,2,4});
+    g3 *= cd(-2,0);
+
+    xarray<cd> t_sum = gate + g2 + g3;
+
+    TDD tdd1 = convert_tensor_to_TDD(gate);
+    TDD tdd2 = convert_tensor_to_TDD(g2);
+    TDD tdd3 = convert_tensor_to_TDD(g3);
+    std::cout << t_sum << std::endl;
+    std::vector<TDD> tdds;
+    tdds.push_back(tdd1);
+    tdds.push_back(tdd2);
+    tdds.push_back(tdd3);
+    TDD tdd = add_tdds(tdds);
+
+
 
     bool valid = true;
-    // for rank 2
-    // for (uint32_t i = 0; i < gate.shape()[0]; i++) {
-    //     for (uint32_t j = 0; j < gate.shape()[1]; j++) {
-    //         cd value = tdd.get_value({i,j});
-    //         std::cout << value << std::endl;
-    //         if (value != gate(i,j)) {
-    //             valid = false;
-    //         }
-    //     }
-    // }
 
     for (uint32_t i = 0; i < gate.shape()[0]; i++) {
         for (uint32_t j = 0; j < gate.shape()[1]; j++) {
             for (uint32_t k = 0; k < gate.shape()[2]; k++) {
                 cd value = tdd.get_value({i,j,k});
                 std::cout << value << std::endl;
-                if (value != gate(i,j,k)) {
+                if (value != t_sum(i,j,k)) {
                     valid = false;
                 }
             }

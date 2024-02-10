@@ -6,6 +6,7 @@
 #include <functional>
 #include <set>
 #include <unordered_map>
+#include <algorithm>
 #include "xtensor/xarray.hpp"
 #include <xtensor/xstrided_view.hpp>
 
@@ -158,8 +159,8 @@ class TDD_Map {
         std::unordered_map<TDD_Edge, uint16_t> edge_map;
         std::unordered_map<TDD_Node, uint16_t> node_map;
 
-        // unique terminal node is defined here
-        TDD_Node terminal_node = TDD_Node();
+        // unique terminal node is defined here, -1 is chosen as axis index to ensure it is always last
+        TDD_Node terminal_node= TDD_Node(-1);
 
     public:
         // for adding new nodes and edges to the maps, returns pointer to node or edge
@@ -189,10 +190,14 @@ class TDD_Map {
         // for removing references
         void remove_node_ref(const TDD_Node *node) {
             TDD_Node temp = *node;
+            // if node is terminal, reference doesnt matter
+            if (temp.is_terminal()) {
+                return;
+            }
             auto it = node_map.find(temp);
             if (it != node_map.end()) {
                 it->second -= 1;
-                if (it->second == 0) {
+                if (it->second == 0 ) {
                     // then remove the node
                     node_map.erase(it);
                 }
@@ -213,8 +218,10 @@ class TDD_Map {
         }
         
         // for this I need to make sure the weight is directly propagated upwards in recursive def
-        TDD_Node *get_terminal_node() {
-            return &terminal_node;
+        const TDD_Node *get_terminal_node() {
+            auto pr = node_map.emplace(terminal_node, 0);
+            auto it = pr.first;
+            return &(it->first);
         }
 
         size_t num_unique_nodes() {
@@ -280,6 +287,10 @@ class TDD {
             return in_weight * root->get_weight(indices[0]) * next->get_value(new_indices);
         }
 
+        bool operator==(const TDD &other) const {
+            return (in_weight == other.get_weight() && root == other.get_root());
+        }
+
 };
 
 // recursive implementation to convert arbitrary tensor into a TDD
@@ -316,7 +327,7 @@ TDD convert_tensor_to_TDD(xarray<cd> tensor, uint8_t axis = 0) {
         if (normalisation_weight != cd(0,0)) {
             next_weight = next_weight / normalisation_weight;
         }
-        // need notion of approximately equal 0 here to account for floating point errors
+        // TODO need notion of approximately equal 0 here to account for floating point errors
         else if (next_weight != cd(0,0)) {
             normalisation_weight = next_weight;
             next_weight = 1;
@@ -331,7 +342,7 @@ TDD convert_tensor_to_TDD(xarray<cd> tensor, uint8_t axis = 0) {
     // apply reductions
     // RR2 - redirect weight 0 edge to terminal 
     // if weight is 0, then node is just the terminal node with in_weight 0
-    // does this need approximate equality?
+    // TODO? does this need approximate equality?
     if (weight == cd(0,0)) {
         // in this case, we also need to delete subnodes as we are replacing current node with terminal
         // removing edge reference should also eliminate references to the node
@@ -356,6 +367,112 @@ TDD convert_tensor_to_TDD(xarray<cd> tensor, uint8_t axis = 0) {
     // otherwise, the new node is now reduced and we can add it to the map
     const TDD_Node *new_node_ptr = cache_map.add_node(new_node, true);
 
+    return TDD(new_node_ptr, weight);
+}
+
+// should this be done inplace? or instead returning new TDDs, leaving cleanup to be done later?
+// assumes the two TDDs have the same index set and axis
+
+// TODO implement cleanup
+
+// should add be extended to be able to add an arbitrary number of TDDs? I believe it is necessary for
+// efficient contraction
+TDD add_tdds(std::vector<TDD> tdds) {
+    std::vector<const TDD_Node *> roots;
+    std::set<const TDD_Node *> root_set;
+    cd weight_sum = 0;
+    uint8_t min_axis_index = tdds[0].get_root()->get_axis_index();
+    size_t dimension = tdds[0].get_root()->get_dimension();
+    for (TDD tdd : tdds) {
+        const TDD_Node *current_root = tdd.get_root();
+        roots.push_back(current_root);
+
+        // set to keep track of whether they are all equal
+        root_set.insert(current_root);
+
+        // sum in weights in case all the roots are the same
+        weight_sum += tdd.get_weight();
+
+        // find minimum axis index to use as next level of resulting TDD
+        uint8_t axis_index = current_root->get_axis_index();
+        if (axis_index < min_axis_index) {
+            min_axis_index = axis_index;
+            dimension = current_root->get_dimension();
+        }
+    }
+
+    // check if they are all pointing to the same root
+    if (root_set.size() == 1) {
+        // if so, sum of the TDDs simply requires adding the weights
+        return TDD(roots[0], weight_sum);
+    }
+
+    // otherwise start generating new node, with the minimum axis index
+    TDD_Node new_node(min_axis_index);
+    cd weight = 1;
+
+    // compute successors, normalising in the process
+    cd normalisation_weight = 0;
+    std::set<const TDD_Edge *> new_edge_set;
+    for (size_t i = 0; i < dimension; i++) {
+        std::vector<TDD> sub_tdds;
+        // calculate correct sub_tdds for each tdd being added
+        // indexed over the current index
+        for (size_t j = 0; j < roots.size(); j++) {
+            const TDD_Node *root = roots[j];
+            // if the axis index is equal to the currently processed one
+            // then we can index it directly
+            if (root->get_axis_index() == min_axis_index) {
+                const TDD_Edge *edge = root->get_successor_ref(i);
+                const TDD_Node *node = edge->get_target();
+                cd edge_weight = tdds[j].get_weight() * edge->get_weight();
+                sub_tdds.push_back(TDD(node, edge_weight));
+            }
+            // otherwise we are on a later axis index, and can just return the current TDD
+            else {
+                sub_tdds.push_back(tdds[j]);
+            }
+        }
+
+        TDD child = add_tdds(sub_tdds);
+
+        const TDD_Node *next_node = child.get_root();
+
+        cd next_weight = child.get_weight();
+
+        // apply normalisation while iterating through successors
+        if (normalisation_weight != cd(0,0)) {
+            next_weight = next_weight / normalisation_weight;
+        }
+        // TODO need notion of approximately equal 0 here to account for floating point errors
+        else if (next_weight != cd(0,0)) {
+            normalisation_weight = next_weight;
+            next_weight = 1;
+        }
+
+        new_edge_set.insert(new_node.add_successor(next_node, next_weight));
+    }
+    weight *= normalisation_weight;
+
+    // apply remaining reductions
+    // RR2 - see convert to tdd for more info
+    if (weight == cd(0,0)) {
+        new_node.clear_successors();
+        return TDD(cache_map.get_terminal_node(), 0);
+    }
+
+    // RR3 - see convert to tdd for more info
+    if (new_edge_set.size() == 1) {
+        const TDD_Node next_node = *(new_node.get_successor_ref(0)->get_target());
+        // delete the successors
+        new_node.clear_successors();
+
+        const TDD_Node *new_node_ptr = cache_map.add_node(next_node, true);
+
+        return TDD(new_node_ptr, weight);
+    }
+
+    const TDD_Node *new_node_ptr = cache_map.add_node(new_node, true);
     return TDD(new_node_ptr, weight);
 }
 
