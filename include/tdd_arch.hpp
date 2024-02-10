@@ -104,7 +104,9 @@ class TDD_Node {
             return successors[index]->get_weight();
         }
 
-        void clear_successors();
+        void clear_successors() const;
+
+        void cleanup() const;
         
         cd get_value (xarray<size_t> indices) const {
             if (is_terminal()) {
@@ -160,23 +162,25 @@ class TDD_Map {
         std::unordered_map<TDD_Node, uint16_t> node_map;
 
         // unique terminal node is defined here, -1 is chosen as axis index to ensure it is always last
-        TDD_Node terminal_node= TDD_Node(-1);
+        TDD_Node terminal_node = TDD_Node(-1);
 
     public:
         // for adding new nodes and edges to the maps, returns pointer to node or edge
-        const TDD_Node *add_node(TDD_Node node, bool instantiating) {
-            auto pr = node_map.emplace(node, 0);
+        const TDD_Node *add_node(TDD_Node node) {
+            auto pr = node_map.emplace(node, 1);
             auto it = pr.first;
-            if (!pr.second && !instantiating) {
-                // if it already exists, increment refcount;
-                it->second++;
+            if (!pr.second) {
+                // if it already exists, increment refcount unless it is terminal;
+                if (!node.is_terminal()) {
+                    it->second++;
+                }
             }
 
             return &(it->first);
         }
 
         const TDD_Edge *add_edge(TDD_Edge edge) {
-            add_node(*(edge.get_target()), false);
+            add_node(*(edge.get_target()));
             auto pr = edge_map.emplace(edge, 1);
             auto it = pr.first;
             if (!pr.second) {
@@ -188,16 +192,16 @@ class TDD_Map {
         }
         
         // for removing references
-        void remove_node_ref(const TDD_Node *node) {
+        void remove_node_ref(const TDD_Node *node, bool del = true) {
             TDD_Node temp = *node;
-            // if node is terminal, reference doesnt matter
+            // if node is terminal, do not change refcount
             if (temp.is_terminal()) {
                 return;
             }
             auto it = node_map.find(temp);
             if (it != node_map.end()) {
                 it->second -= 1;
-                if (it->second == 0 ) {
+                if (it->second == 0 && del) {
                     // then remove the node
                     node_map.erase(it);
                 }
@@ -246,8 +250,19 @@ inline const TDD_Edge *TDD_Node::add_successor(const TDD_Node *t, cd &w) {
     return new_edge_ptr;
 }
 
-inline void TDD_Node::clear_successors() {
+inline void TDD_Node::clear_successors() const {
     for (size_t i = 0; i < successors.size(); i++) {
+        cache_map.remove_edge_ref(successors[i]);
+    }
+}
+
+inline void TDD_Node::cleanup() const {
+    if (is_terminal()) {
+        return;
+    }
+    for (size_t i = 0; i < successors.size(); i++) {
+        const TDD_Node *next = get_successor_ref(i)->get_target();
+        next->cleanup();
         cache_map.remove_edge_ref(successors[i]);
     }
 }
@@ -291,10 +306,15 @@ class TDD {
             return (in_weight == other.get_weight() && root == other.get_root());
         }
 
+        void cleanup() const {
+            get_root()->cleanup();
+            cache_map.remove_node_ref(get_root());
+        }
+
 };
 
 // recursive implementation to convert arbitrary tensor into a TDD
-TDD convert_tensor_to_TDD(xarray<cd> tensor, uint8_t axis = 0) {
+TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint8_t axis = 0) {
 
     if (tensor.size() == 1) {
         // if terminal node, then just return trivial TDD with in_weight equal to weight
@@ -320,6 +340,7 @@ TDD convert_tensor_to_TDD(xarray<cd> tensor, uint8_t axis = 0) {
         TDD child = convert_tensor_to_TDD(new_tensor, axis + 1);
 
         const TDD_Node *next_node = child.get_root();
+        cache_map.remove_node_ref(next_node, false);
 
         cd next_weight = child.get_weight();
 
@@ -359,25 +380,33 @@ TDD convert_tensor_to_TDD(xarray<cd> tensor, uint8_t axis = 0) {
         // delete the successors
         new_node.clear_successors();
 
-        const TDD_Node *new_node_ptr = cache_map.add_node(next_node, true);
+        const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
 
         return TDD(new_node_ptr, weight);
     }
 
     // otherwise, the new node is now reduced and we can add it to the map
-    const TDD_Node *new_node_ptr = cache_map.add_node(new_node, true);
+    const TDD_Node *new_node_ptr = cache_map.add_node(new_node);
 
     return TDD(new_node_ptr, weight);
 }
 
+// TODO can change set checking to ensure all the same to stop adding them once there are
+// two distinct elements in the set (at that point there is a guarantee they wont all be the same,
+// so can save on memory by no longer adding to the set)
+
+
+
 // should this be done inplace? or instead returning new TDDs, leaving cleanup to be done later?
 // assumes the two TDDs have the same index set and axis
 
-// TODO implement cleanup
+// TODO implement cleanup option?
+// I believe the addition of tdds is only necessary as part of contraction
+// thus we should be able to eliminate the old tdds used as part of the sum
 
 // should add be extended to be able to add an arbitrary number of TDDs? I believe it is necessary for
 // efficient contraction
-TDD add_tdds(std::vector<TDD> tdds) {
+TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
     std::vector<const TDD_Node *> roots;
     std::set<const TDD_Node *> root_set;
     cd weight_sum = 0;
@@ -404,6 +433,10 @@ TDD add_tdds(std::vector<TDD> tdds) {
     // check if they are all pointing to the same root
     if (root_set.size() == 1) {
         // if so, sum of the TDDs simply requires adding the weights
+        // cleanup all of the other tdds
+        for (size_t i = 1; i < tdds.size(); i++) {
+            tdds[i].cleanup();
+        }
         return TDD(roots[0], weight_sum);
     }
 
@@ -434,9 +467,10 @@ TDD add_tdds(std::vector<TDD> tdds) {
             }
         }
 
-        TDD child = add_tdds(sub_tdds);
+        TDD child = add_tdds(sub_tdds, false);
 
         const TDD_Node *next_node = child.get_root();
+        cache_map.remove_node_ref(next_node, false);
 
         cd next_weight = child.get_weight();
 
@@ -452,9 +486,22 @@ TDD add_tdds(std::vector<TDD> tdds) {
 
         new_edge_set.insert(new_node.add_successor(next_node, next_weight));
     }
-    weight *= normalisation_weight;
+
+    // we can now clean up the summands used at this step (any of those with axis_index == min_axis_index)
+    for (size_t i = 0; i < roots.size(); i++) {
+        const TDD_Node *root = roots[i];
+        // only clean up if we actually used the index at this stage
+        if (root->get_axis_index() == min_axis_index) {
+            root->clear_successors();
+        }
+        // clean up top level tdds if its the top level call
+        if (first) {
+            cache_map.remove_node_ref(root);
+        }
+    }
 
     // apply remaining reductions
+    weight *= normalisation_weight;
     // RR2 - see convert to tdd for more info
     if (weight == cd(0,0)) {
         new_node.clear_successors();
@@ -466,13 +513,12 @@ TDD add_tdds(std::vector<TDD> tdds) {
         const TDD_Node next_node = *(new_node.get_successor_ref(0)->get_target());
         // delete the successors
         new_node.clear_successors();
-
-        const TDD_Node *new_node_ptr = cache_map.add_node(next_node, true);
+        const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
 
         return TDD(new_node_ptr, weight);
     }
 
-    const TDD_Node *new_node_ptr = cache_map.add_node(new_node, true);
+    const TDD_Node *new_node_ptr = cache_map.add_node(new_node);
     return TDD(new_node_ptr, weight);
 }
 

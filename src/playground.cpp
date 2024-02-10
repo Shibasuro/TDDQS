@@ -79,7 +79,6 @@ void tn_test() {
 }
 
 void tdd_playground() {
-    // xarray<cd> gate = controlled_z_gate();
     xarray<cd> gate = zeros<cd>({4,4});
     gate(0,0) = cd(1,0);
     gate(2,1) = cd(1,0);
@@ -107,8 +106,6 @@ void tdd_playground() {
     tdds.push_back(tdd2);
     tdds.push_back(tdd3);
     TDD tdd = add_tdds(tdds);
-
-
 
     bool valid = true;
 
