@@ -1,2 +1,2 @@
 # TNQS
-Tensor Network Quantum Simulation project
+Tensor Decision Diagram Network Quantum Simulation project
