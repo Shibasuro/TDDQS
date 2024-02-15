@@ -297,6 +297,16 @@ class TDD {
             return shape;
         }
 
+        // returns first nonzero index, or if none is found then out of bounds index
+        size_t get_first_nonzero_index() const {
+            for (size_t i = 0; i < shape.size(); i++) {
+                if (shape[i] != 0) {
+                    return i;
+                }
+            }
+            return shape.size();
+        }
+
         cd get_value(xarray<size_t> indices) const {
             if (root->is_terminal()) {
                 return in_weight;
@@ -584,23 +594,13 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
     const TDD_Node *f_root = first.get_root();
     const TDD_Node *s_root = second.get_root();
 
-    uint8_t first_axis = f_root->get_axis_index();
-    uint8_t second_axis = s_root->get_axis_index();
-    // if either node is terminal, overwrite the axis index with the length of the shape (as it isnt really valid to index over)
-    if (f_root->is_terminal()) {
-        first_axis = f_shape.size() - 1;
-    }
-    if (s_root->is_terminal()) {
-        second_axis = s_shape.size() - 1;
-    }
-    // should I be taking axis number differently here?
-    // could it be the first non-zero part of the shape instead?
-    // this may be less efficient but also correct?
+    // Can axis number be the first non-zero part of the shape instead?
+    // this may be less efficient than skipping axes but also correct?
     // also should not affect efficiency very much actually, as depth is assumed to not be too high
-    // uint8_t first_axis = f_root->get_axis_index();
-    // uint8_t second_axis = s_root->get_axis_index();
-
-    std::cout << "first_axis: " << (size_t)first_axis << " second_axis: " << (size_t)second_axis << std::endl;
+    // If not using this method, may require more complex implementation
+    // or different index order -- TODO investigate
+    uint8_t first_axis = first.get_first_nonzero_index();
+    uint8_t second_axis = second.get_first_nonzero_index();
 
     // start generating new node, with the minimum axis index
     TDD_Node new_node(axis);
@@ -629,48 +629,21 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
             indexing_scheme = 2;
         }
     }
-    else if (f_root->is_terminal()) {
-        // then second one is not terminal, but may require contraction?
-        if (second_axis >= second_axes[0]) {
-            // contract in this case
-            dimension = s_shape[second_axis];
-            indexing_scheme = 0;
-        }
-        else {
-            dimension = s_shape[second_axis];
-            indexing_scheme = 2;
-        }
-    }
-    else if (s_root->is_terminal()) {
-        // then first is not terminal
-        if (first_axis >= first_axes[0]) {
-            dimension = f_shape[first_axis];
-            indexing_scheme = 0;
-        }
-        else {
-            dimension = f_shape[first_axis];
-            indexing_scheme = 1;
-        }
-    }
-    else if (first_axis >= first_axes[0] && second_axis >= second_axes[0]) {
-        // Only case where contraction is necessary
-        // need to purge first axis index for both
+    else if (first_axis == first_axes[0] && second_axis == second_axes[0]) {
         dimension = f_shape[first_axis];
         indexing_scheme = 0;
+        // contract in this case
     }
     else if (first_axis < first_axes[0]) {
-        // successors can also be directly extracted for contraction, however we do not reduce the number
-        // of axes left to contract
-        // For this one we take first_axis as successor to index through
+        // prioritise incrementing first axis always
         dimension = f_shape[first_axis];
         indexing_scheme = 1;
     }
-    else /* second_axis < second_axes[0] */ {
-        // for this one we take second_axis as successor to index through
+    else {
+        //otherwise increment second axis
         dimension = s_shape[second_axis];
         indexing_scheme = 2;
     }
-    std::cout << "scheme: " << indexing_scheme << std::endl;
 
     // shape to construct
     // Case 1 - (Dimension, Newly Skipped axes of first, Child_Shape)
@@ -697,97 +670,51 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
         uint8_t new_axis = axis;
 
         // need to select new successors depending on indexing_scheme
-        // also determines how which axes to skip ahead
-        // TODO Another Edge Case, what if we are in indexing_scheme 0, but have not
-        // processed all indices prior to the contraction number
-        // do we really want to set all of the shape to 0?
+        // also determines how which node pointers to progress
         switch(indexing_scheme) {
             case 0:
-                // Index Conditionally and Contract
-                // only bump up the ones which are equal
-                if (first_axis == first_axes[0]) {
+                // Index Both and Contract
+                // should only occur if both axes are equal
+                if (first_axis <= f_root->get_axis_index() && !f_root->is_terminal()) {
                     first_succ_node = f_root->get_successor_ref(i)->get_target();
                     first_succ_weight *= f_root->get_successor_ref(i)->get_weight();
-                    // increment new_axis to account for skipped axes
-                    if (first_succ_node->is_terminal()) {
-                        new_axis += f_shape.size() - first_axis - 1;
-                    }
-                    else {
-                        new_axis += first_succ_node->get_axis_index() - first_axis;
-                    }
-                    // decrement by 1 to account for contracted axis
-                    new_axis -= 1;
+                    // we progress by one index, but leave axis the same to account for 
+                    // lost contraction axis
                 }
-                if (second_axis == second_axes[0]) {
+                if (second_axis <= s_root->get_axis_index() && !s_root->is_terminal()) {
                     second_succ_node = s_root->get_successor_ref(i)->get_target();
                     second_succ_weight *= s_root->get_successor_ref(i)->get_weight();
-                    // increment new_axis to account for skipped axes
-                    if (second_succ_node->is_terminal()) {
-                        new_axis += s_shape.size() - second_axis - 1;
-                    }
-                    else {
-                        new_axis += second_succ_node->get_axis_index() - second_axis;
-                    }
-                    // decrement by 1 to account for contracted axis
-                    new_axis -= 1;
+                    // we progress by one index, but leave axis the same to account for 
+                    // lost contraction axis
                 }
 
                 // correct shapes through logical removal
                 // basically eliminates all parts of the shape that have now been accounted for
-                for (size_t j = 0; j <= first_axes[0]; j++) {
-                    first_succ_shape[j] = 0;
-                }
-                for (size_t j = 0; j <= second_axes[0]; j++) {
-                    second_succ_shape[j] = 0;
-                }
+                first_succ_shape[first_axis] = 0;
+                second_succ_shape[second_axis] = 0;
                 break;
             case 1:
-                {
-                    // Index First
+                // Index First
+                // only increase the index
+                if (first_axis <= f_root->get_axis_index() && !f_root->is_terminal()) {
                     first_succ_node = f_root->get_successor_ref(i)->get_target();
                     first_succ_weight *= f_root->get_successor_ref(i)->get_weight();
-                    // increment by number of axes we progress by 
-                    // ALSO NEED TO ENSURE NEW SUCCESSORS ARE NOT TERMINAL
-                    size_t first_limit = first_succ_node->get_axis_index();
-                    if (first_succ_node->is_terminal()) {
-                        first_limit = f_shape.size() - 1;
-                    }
-                    new_axis += first_limit - first_axis;
-                    // correct shapes through logical removal
-                    for (size_t j = 0; j <= first_axis; j++) {
-                        first_succ_shape[j] = 0;
-                    }
-                    // if its the first child, then build the shape of the result
-                    if (i == 0) {
-                        for (size_t j = first_axis + 1; j < first_limit; j++) {
-                            shape.push_back(f_shape[j]);
-                        }
-                    }
                 }
+                // increment by 1 as we progress forward one index
+                new_axis += 1;
+                // correct shapes through logical removal
+                first_succ_shape[first_axis] = 0;
                 break;
             case 2:
-                {
-                    // Index Second
+                // Index Second
+                if (second_axis <= s_root->get_axis_index() && !s_root->is_terminal()) {
                     second_succ_node = s_root->get_successor_ref(i)->get_target();
                     second_succ_weight *= s_root->get_successor_ref(i)->get_weight();
-                    // increment by number of axis we progress by
-                    // ALSO NEED TO ENSURE NEW SUCCESSORS ARE NOT TERMINAL
-                    size_t second_limit = second_succ_node->get_axis_index();
-                    if (second_succ_node->is_terminal()) {
-                        second_limit = s_shape.size() - 1;
-                    }
-                    new_axis += second_limit - second_axis;
-                    // correct shapes through logical removal
-                    for (size_t j = 0; j <= second_axis; j++) {
-                        second_succ_shape[j] = 0;
-                    }
-                    // if its the first child, then build the shape of the result
-                    if (i == 0) {
-                        for (size_t j = second_axis + 1; j < second_limit; j++) {
-                            shape.push_back(s_shape[j]);
-                        }
-                    }
                 }
+                /// increment by 1 as we progress forward one index
+                new_axis += 1;
+                // correct shapes through logical removal
+                second_succ_shape[second_axis] = 0;
                 break;
         }
 
