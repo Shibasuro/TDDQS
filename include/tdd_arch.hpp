@@ -63,6 +63,7 @@ class TDD_Node {
         // std::vector<const TDD_Edge *> successors;
         // in addition to updating any weight retrieval, successor addition, successor retrieval
         // and deletion
+        // TODO further investigation
 
 
         // Reduction rule 5 involves eliminating redundant edges 
@@ -466,7 +467,7 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
     cd weight = 1;
     // since addition preserves shape, we can set the shape as being the shape of the first TDD
     // it is only crucial to preserve the shape at the top level, as the value of shape is not actually
-    // used, its just necessary to maintain the correct shape
+    // used for addition, its just necessary to maintain the correct shape for contraction
     std::vector<size_t> shape = tdds[0].get_shape();
 
     // compute successors, normalising in the process
@@ -557,7 +558,7 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
 
 // also TODO: apply cleanup of unused nodes and edges during execution
 
-TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std::vector<uint8_t> second_axes, uint8_t axis = 0) {
+TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std::vector<uint8_t> second_axes, uint8_t axis = 0, bool clear = true) {
 
     std::vector<size_t> f_shape = first.get_shape();
     std::vector<size_t> s_shape = second.get_shape();
@@ -630,9 +631,9 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
         }
     }
     else if (first_axis == first_axes[0] && second_axis == second_axes[0]) {
+        // contract in this case
         dimension = f_shape[first_axis];
         indexing_scheme = 0;
-        // contract in this case
     }
     else if (first_axis < first_axes[0]) {
         // prioritise incrementing first axis always
@@ -692,10 +693,13 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
                 // basically eliminates all parts of the shape that have now been accounted for
                 first_succ_shape[first_axis] = 0;
                 second_succ_shape[second_axis] = 0;
+
+                // drop first value as we are contracting that axis at this step
+                new_first_axes = std::vector<uint8_t>(first_axes.begin() + 1, first_axes.end());
+                new_second_axes = std::vector<uint8_t>(second_axes.begin() + 1, second_axes.end());
                 break;
             case 1:
                 // Index First
-                // only increase the index
                 if (first_axis <= f_root->get_axis_index() && !f_root->is_terminal()) {
                     first_succ_node = f_root->get_successor_ref(i)->get_target();
                     first_succ_weight *= f_root->get_successor_ref(i)->get_weight();
@@ -718,41 +722,41 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
                 break;
         }
 
-        if (indexing_scheme == 0) {
-            // drop first value as we are contracting that axis at this step
-            new_first_axes = std::vector<uint8_t>(first_axes.begin() + 1, first_axes.end());
-            new_second_axes = std::vector<uint8_t>(second_axes.begin() + 1, second_axes.end());
-        }
         TDD first_successor = TDD(first_succ_node, first_succ_weight, first_succ_shape);
         TDD second_successor = TDD(second_succ_node, second_succ_weight, second_succ_shape);
 
-        TDD child = contract_tdds(first_successor, second_successor, new_first_axes, new_second_axes, new_axis);
-        new_tdds.push_back(child);
+        TDD child = contract_tdds(first_successor, second_successor, new_first_axes, new_second_axes, new_axis, false);
 
-        const TDD_Node *next_node = child.get_root();
-        cache_map.remove_node_ref(next_node, false);
+        // if we are contracting (scheme 0) then we only need to store the new tdds and add them
+        if (indexing_scheme == 0) {
+            new_tdds.push_back(child);
+        }
+        else {
+            const TDD_Node *next_node = child.get_root();
+            cache_map.remove_node_ref(next_node, false);
 
-        cd next_weight = child.get_weight();
+            cd next_weight = child.get_weight();
 
-        std::vector<size_t> child_shape = child.get_shape();
-        // if its the first child, use it to construct the shape
-        if (i == 0) {
-            for (size_t a : child_shape) {
-                shape.push_back(a);
+            std::vector<size_t> child_shape = child.get_shape();
+            // if its the first child, use it to construct the shape
+            if (i == 0) {
+                for (size_t a : child_shape) {
+                    shape.push_back(a);
+                }
             }
-        }
 
-        // apply normalisation while iterating through successors
-        if (normalisation_weight != cd(0,0)) {
-            next_weight = next_weight / normalisation_weight;
-        }
-        // TODO need notion of approximately equal 0 here to account for floating point errors
-        else if (next_weight != cd(0,0)) {
-            normalisation_weight = next_weight;
-            next_weight = 1;
-        }
+            // apply normalisation while iterating through successors
+            if (normalisation_weight != cd(0,0)) {
+                next_weight = next_weight / normalisation_weight;
+            }
+            // TODO need notion of approximately equal 0 here to account for floating point errors
+            else if (next_weight != cd(0,0)) {
+                normalisation_weight = next_weight;
+                next_weight = 1;
+            }
 
-        new_edge_set.insert(new_node.add_successor(next_node, next_weight));
+            new_edge_set.insert(new_node.add_successor(next_node, next_weight));
+        }
     }
 
     if (indexing_scheme == 0) {
@@ -762,10 +766,31 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
         return add_tdds(new_tdds);
     }
 
-    // otherwise, clean up the recursive elements and reduce the TDD
-    // TODO Clean up
+    // clean up no longer needed elements
+    // Only cleanup if we have actually progressed the pointer at this step
+    // problem is that we have a successor of new node being the same as a successor of f_root or s_root?
+    // TODO investigate possibility of more efficient cleanup
+    // if (first_axis <= f_root->get_axis_index() && !f_root->is_terminal() && indexing_scheme == 1) {
+    //     // seems to cause issues without this edge being added, this is due to implementation of add
+    //     // problem is that its not distinct from f_roots successors
+    //     //cache_map.add_edge(*(f_root->get_successor_ref(0)));
+    //     //f_root->clear_successors();
+    // }
+    // if (second_axis <= s_root->get_axis_index() && !s_root->is_terminal() && indexing_scheme == 2) {
+    //     //cache_map.add_edge(*(s_root->get_successor_ref(0)));
+    //     //s_root->clear_successors();
+    // }
 
-    // Begin reduction
+    // although the below is effective, it also does not clean up as dynamically as we would like
+    // TODO this may result in higher maximum node counts during contraction
+    // so it is important to look into making cleanup finer grained (i.e. clean up during execution)
+    if (clear) {
+        // then we are in initial call, clear the input TDDs
+        first.cleanup();
+        second.cleanup();
+    }
+
+    // reduce the TDD
     weight *= normalisation_weight;
     // RR2 - see convert to tdd for more info
     if (weight == cd(0,0)) {
