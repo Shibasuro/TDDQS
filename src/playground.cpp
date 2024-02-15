@@ -107,6 +107,11 @@ void tdd_playground() {
     tdds.push_back(tdd3);
     TDD tdd = add_tdds(tdds);
 
+    std::vector<size_t> shape = tdd.get_shape();
+    for (uint32_t i = 0; i < shape.size(); i++) {
+        std::cout << "dimension for index " << i << " is " << shape[i] << std::endl;
+    }
+
     bool valid = true;
 
     for (uint32_t i = 0; i < gate.shape()[0]; i++) {
@@ -126,10 +131,76 @@ void tdd_playground() {
     std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;
 }
 
+void tdd_contract_test() {
+    xarray<cd> gate = zeros<cd>({4,4});
+    gate(0,0) = cd(1,0);
+    gate(2,1) = cd(1,0);
+    gate(1,2) = cd(1,0);
+    gate(3,1) = cd(1,0);
+    gate(0,3) = cd(1,0);
+    gate(2,2) = cd(1,0);
+    gate(3,3) = cd(1,0);
+    gate(3,0) = cd(1,0);
+    gate.reshape({2,2,4});
+    xarray<cd> g2 = ones<cd>({4,4});
+    g2.reshape({2,2,4});
+
+    xarray<cd> contracted = linalg::tensordot(gate, g2, {1}, {1});
+
+    // reorder so that it is same ordering as TDD implementation
+    contracted = swapaxes(contracted, 1, 2);
+
+    std::cout << contracted << std::endl;
+
+    TDD tdd_expected = convert_tensor_to_TDD(contracted);
+
+    std::cout << "expected nodes: " << cache_map.num_unique_nodes() << std::endl;
+    std::cout << "expected edges: " << cache_map.num_unique_edges() << std::endl;
+
+    svector<size_t> shape = contracted.shape();
+    for (uint32_t i = 0; i < shape.size(); i++) {
+        std::cout << "dimension for index " << i << " is " << shape[i] << std::endl;
+    }
+
+
+    TDD tdd1 = convert_tensor_to_TDD(gate);
+    TDD tdd2 = convert_tensor_to_TDD(g2);
+
+    std::cout << "contracting... " << std::endl;
+
+    TDD contracted_tdd = contract_tdds(tdd1, tdd2, {1}, {1});
+
+    std::vector<size_t> t_shape = contracted_tdd.get_shape();
+    
+    for (uint32_t i = 0; i < t_shape.size(); i++) {
+        std::cout << "dimension for index " << i << " is " << t_shape[i] << std::endl;
+    }
+
+    bool valid = true;
+    for (size_t i = 0; i < shape[0]; i++) {
+        for (size_t j = 0; j < shape[1]; j++) {
+            for (size_t k = 0; k < shape[2]; k++) {
+                for (size_t l = 0; l < shape[3]; l++) {
+                    cd value = contracted_tdd.get_value({i,j,k,l});
+                    // std::cout << value << " vs expected: " << contracted(i,j,k,l) << std::endl;
+                    if (value != contracted(i,j,k,l)) {
+                        valid = false;
+                    }
+                }
+            }
+        }
+    }
+    std::cout << "Validity: " << valid << std::endl;
+
+    std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
+    std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;
+}
+
 int main()
 {
     //tn_test();
-    tdd_playground();
+    //tdd_playground();
+    tdd_contract_test();
 
     return 0;
 }
