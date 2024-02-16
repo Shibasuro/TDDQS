@@ -58,6 +58,11 @@ class Instruction {
             type = t;
             q1 = qubit1;
         }
+        Instruction(Instr_type t, Gate g, uint32_t qubit1) {
+            type = t;
+            gate = g;
+            q1 = qubit1;
+        }
         Instruction(Instr_type t, Gate g, uint32_t qubit1, uint32_t qubit2) {
             type = t;
             gate = g;
@@ -78,6 +83,9 @@ class Instruction {
         }
         Gate get_gate() {
             return gate;
+        }
+        bool is_single_qubit_gate() {
+            return gate.is_single_qubit_gate();
         }
 };
 

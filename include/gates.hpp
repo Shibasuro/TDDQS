@@ -24,7 +24,7 @@ xarray<cd> pauli_x_gate() {
 }
 
 xarray<cd> pauli_y_gate() {
-    return {{cd(0,0), cd(0, -1)}, {cd(0, -1), cd(0,0)}};
+    return {{cd(0,0), cd(0, -1)}, {cd(0, 1), cd(0,0)}};
 }
 
 xarray<cd> pauli_z_gate() {

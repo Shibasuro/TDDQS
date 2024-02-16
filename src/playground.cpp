@@ -8,8 +8,8 @@
 #include <vector>
 #include <xtensor-blas/xlinalg.hpp>
 #include <xtensor/xrandom.hpp>
+#include "tdd_circuit.hpp"
 #include "simulator.hpp"
-#include "tdd_arch.hpp"
 
 TDD_Map cache_map;
 
@@ -196,11 +196,33 @@ void tdd_contract_test() {
     std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;
 }
 
+void tdd_circuit_test() {
+    uint32_t num_qubits = 3;
+    TDD_Circuit circ(num_qubits);
+    // something is going wrong either with contraction or with choice of axes to contract over
+    // circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 0));
+    // circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 0));
+    // circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 1));
+    // circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 1));
+    // circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 2));
+    // circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 2));
+    circ.simulate();
+    for (size_t i = 0; i < 2; i++) {
+        for (size_t j = 0; j < 2; j++) {
+            for (size_t k = 0; k < 2; k++) {
+                cd value = circ.get_amplitude({i,j,k});
+                std::cout << "Amplitude of " << i << j << k << " = " << value << std::endl;
+            }
+        }
+    }
+}
+
 int main()
 {
     //tn_test();
     //tdd_playground();
-    tdd_contract_test();
+    // tdd_contract_test();
+    tdd_circuit_test();
 
     return 0;
 }

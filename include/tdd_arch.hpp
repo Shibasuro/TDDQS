@@ -110,7 +110,7 @@ class TDD_Node {
 
         void cleanup() const;
         
-        cd get_value (xarray<size_t> indices) const {
+        cd get_value(xarray<size_t> indices) const {
             if (is_terminal()) {
                 return cd(1,0);
             }
@@ -119,19 +119,12 @@ class TDD_Node {
                 // TODO HANDLE ELEGANTLY INSTEAD OF RETURNING WEIRD VALUE
                 return cd(-2,0);
             }
-            size_t current_index = indices[0];
+            size_t current_index = indices[axis_index];
             if (get_weight(current_index) == cd{0,0}) {
                 return cd(0,0);
             }
             const TDD_Node *next = get_successor_ref(current_index)->get_target();
-            xarray<size_t> new_indices;
-            // if next is not terminal then node merge is relevant
-            if (!next->is_terminal()) {
-                // account for node merge by tracking the axis index
-                uint8_t index_diff = next->get_axis_index() - get_axis_index();
-                new_indices = view(indices, range(index_diff, indices.size()));
-            }
-            return get_weight(current_index) * next->get_value(new_indices);
+            return get_weight(current_index) * next->get_value(indices);
         }
 
         bool operator==(const TDD_Node &other) const {
@@ -315,14 +308,9 @@ class TDD {
             if (in_weight == cd{0,0}) {
                 return 0;
             }
-            const TDD_Node *next = root->get_successor_ref(indices[0])->get_target();
-            xarray<size_t> new_indices;
-            if (!next->is_terminal()) {
-                // account for node merge by tracking the axis index
-                uint32_t index_diff = next->get_axis_index() - root->get_axis_index();
-                new_indices = view(indices, range(index_diff, indices.size()));
-            }
-            return in_weight * root->get_weight(indices[0]) * next->get_value(new_indices);
+            uint8_t axis_index = root->get_axis_index();
+            const TDD_Node *next = root->get_successor_ref(indices[axis_index])->get_target();
+            return in_weight * root->get_weight(indices[axis_index]) * next->get_value(indices);
         }
 
         bool operator==(const TDD &other) const {
@@ -556,8 +544,6 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
 // followed by indices before first contraction index for second TDD, and so on
 // e.g. T1 (a, b, c) T2 (d, b, e) contracted on d results in T (a, d, c, e)
 
-// also TODO: apply cleanup of unused nodes and edges during execution
-
 TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std::vector<uint8_t> second_axes, uint8_t axis = 0, bool clear = true) {
 
     std::vector<size_t> f_shape = first.get_shape();
@@ -647,9 +633,8 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
     }
 
     // shape to construct
-    // Case 1 - (Dimension, Newly Skipped axes of first, Child_Shape)
-    // Case 2 - (Dimension, Newly Skipped axes of second, Child_Shape) 
-    // For cases 0 and 3, addition takes care of shape considerations
+    // (Dimension, Child_Shape)
+    // Otherwise addition handles the shape
     std::vector<size_t> shape;
     shape.push_back(dimension);
 
@@ -671,7 +656,7 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
         uint8_t new_axis = axis;
 
         // need to select new successors depending on indexing_scheme
-        // also determines how which node pointers to progress
+        // also determines which node pointers to progress
         switch(indexing_scheme) {
             case 0:
                 // Index Both and Contract
