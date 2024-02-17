@@ -198,14 +198,14 @@ void tdd_contract_test() {
 
 void tdd_circuit_test() {
     uint32_t num_qubits = 3;
-    TDD_Circuit circ(num_qubits);
+    TDD_Circuit circ(num_qubits, "000");
     // something is going wrong either with contraction or with choice of axes to contract over
-    // circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 0));
-    // circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 0));
-    // circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 1));
-    // circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 1));
-    // circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 2));
-    // circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 2));
+    circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 0));
+    circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 0));
+    circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 1));
+    circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 1));
+    circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 2));
+    circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 2));
     circ.simulate();
     for (size_t i = 0; i < 2; i++) {
         for (size_t j = 0; j < 2; j++) {

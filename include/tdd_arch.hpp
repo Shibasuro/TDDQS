@@ -548,6 +548,15 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
 
     std::vector<size_t> f_shape = first.get_shape();
     std::vector<size_t> s_shape = second.get_shape();
+
+    // Can axis number be the first non-zero part of the shape instead?
+    // this may be less efficient than skipping axes but also correct?
+    // also should not affect efficiency very much actually, as depth is assumed to not be too high
+    // If not using this method, may require more complex implementation
+    // or different index order -- TODO investigate
+    uint8_t first_axis = first.get_first_nonzero_index();
+    uint8_t second_axis = second.get_first_nonzero_index();
+    
     // check if both TDDs are trivial (i.e. root is terminal)
     if (first.get_root()->is_terminal() && second.get_root()->is_terminal()) {
         // compute the new weight post contraction
@@ -563,14 +572,13 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
 
         // compute new shape (ordered by first TDDs axes first, followed by second TDDs axes)
         std::vector<size_t> new_shape;
-        for (uint8_t i = 0; i < f_shape.size(); i++) {
-            // zero check is to make sure we do not include logically removed parts of the shape
-            if (removed_f_axes.find(i) == removed_f_axes.end() && f_shape[i] != 0) {
+        for (uint8_t i = first_axis; i < f_shape.size(); i++) {
+            if (removed_f_axes.find(i) == removed_f_axes.end()) {
                 new_shape.push_back(f_shape[i]);
             }
         }
-        for (uint8_t i = 0; i < s_shape.size(); i++) {
-            if (removed_s_axes.find(i) == removed_s_axes.end() && s_shape[i] != 0) {
+        for (uint8_t i = second_axis; i < s_shape.size(); i++) {
+            if (removed_s_axes.find(i) == removed_s_axes.end()) {
                 new_shape.push_back(s_shape[i]);
             }
         }
@@ -580,14 +588,6 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
 
     const TDD_Node *f_root = first.get_root();
     const TDD_Node *s_root = second.get_root();
-
-    // Can axis number be the first non-zero part of the shape instead?
-    // this may be less efficient than skipping axes but also correct?
-    // also should not affect efficiency very much actually, as depth is assumed to not be too high
-    // If not using this method, may require more complex implementation
-    // or different index order -- TODO investigate
-    uint8_t first_axis = first.get_first_nonzero_index();
-    uint8_t second_axis = second.get_first_nonzero_index();
 
     // start generating new node, with the minimum axis index
     TDD_Node new_node(axis);
@@ -661,13 +661,13 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
             case 0:
                 // Index Both and Contract
                 // should only occur if both axes are equal
-                if (first_axis <= f_root->get_axis_index() && !f_root->is_terminal()) {
+                if (first_axis >= f_root->get_axis_index() && !f_root->is_terminal()) {
                     first_succ_node = f_root->get_successor_ref(i)->get_target();
                     first_succ_weight *= f_root->get_successor_ref(i)->get_weight();
                     // we progress by one index, but leave axis the same to account for 
                     // lost contraction axis
                 }
-                if (second_axis <= s_root->get_axis_index() && !s_root->is_terminal()) {
+                if (second_axis >= s_root->get_axis_index() && !s_root->is_terminal()) {
                     second_succ_node = s_root->get_successor_ref(i)->get_target();
                     second_succ_weight *= s_root->get_successor_ref(i)->get_weight();
                     // we progress by one index, but leave axis the same to account for 
@@ -685,7 +685,7 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
                 break;
             case 1:
                 // Index First
-                if (first_axis <= f_root->get_axis_index() && !f_root->is_terminal()) {
+                if (first_axis >= f_root->get_axis_index() && !f_root->is_terminal()) {
                     first_succ_node = f_root->get_successor_ref(i)->get_target();
                     first_succ_weight *= f_root->get_successor_ref(i)->get_weight();
                 }
@@ -696,7 +696,7 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
                 break;
             case 2:
                 // Index Second
-                if (second_axis <= s_root->get_axis_index() && !s_root->is_terminal()) {
+                if (second_axis >= s_root->get_axis_index() && !s_root->is_terminal()) {
                     second_succ_node = s_root->get_successor_ref(i)->get_target();
                     second_succ_weight *= s_root->get_successor_ref(i)->get_weight();
                 }

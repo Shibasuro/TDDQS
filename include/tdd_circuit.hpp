@@ -2,6 +2,7 @@
 #define TDDCIRC
 #include "tdd_arch.hpp"
 #include "circuit.hpp"
+#include <string>
 
 // n qubit initial TDD state?
 // That method would be necessary for a state evolution approach
@@ -58,13 +59,18 @@ class TDD_Circuit {
         // currently not needed to be updated as we are updating in sequence?
         std::vector<uint8_t> contraction_axes;
     
-        void initialise_state() {
+        void initialise_state(std::string bitstring) {
             // for now this is just a rank n TDD, all qubits initialised to state 0
             svector<size_t> shape;
             xstrided_slice_vector slice;
             for (uint32_t i = 0; i < num_qubits; i++) {
                 shape.push_back(2);
-                slice.push_back(0);
+                if (bitstring[i] == '0') {
+                    slice.push_back(0);
+                }
+                else {
+                    slice.push_back(1);
+                }
                 contraction_axes.push_back(i);
             }
             xarray<cd> tensor_state = zeros<cd>(shape);
@@ -84,10 +90,6 @@ class TDD_Circuit {
                     uint8_t target_axis = contraction_axes[target];
 
                     // this should leave axis in correct place
-                    // something might still be wrong with this
-                    // WHAT APPEARS TO BE HAPPENING
-                    // the new axis ends up at the end - thus why everything cancels with target axis 2
-                    // HOWEVER this issue does not occur if the initial state is 1???
                     state = contract_tdds(state, gate_TDD, {target_axis}, {1});
                 }
                 else {
@@ -114,15 +116,14 @@ class TDD_Circuit {
                         // imjn, bmcn -> ibjc // which is what we want
                         state = contract_tdds(gate_TDD, state, {1,3}, {target_axis2, target_axis1});
                     }
-
                 }
             }
         }
 
     public:
-        TDD_Circuit(uint32_t qubits) {
+        TDD_Circuit(uint32_t qubits, std::string bitstring) {
             num_qubits = qubits;
-            initialise_state();
+            initialise_state(bitstring);
         }
 
         void add_instruction(Instruction instr) {
