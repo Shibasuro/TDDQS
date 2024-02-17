@@ -433,13 +433,13 @@ class Simulator {
             if (rand_val <= p0) {
                 // then we have measured a 0, so update gamma accordingly
                 std::vector<double> p0_v({p0});
-                Gate update_gate(&update_to_0, true, &p0_v);
+                Gate update_gate(&update_to_0, true, p0_v);
                 apply_single_qubit_gate(qubit, update_gate);
             }
             else {
                 // otherwise we have measured a 1, so update gamma accordingly
                 std::vector<double> p1_v({1 - p0});
-                Gate update_gate(&update_to_1, true, &p1_v);
+                Gate update_gate(&update_to_1, true, p1_v);
                 apply_single_qubit_gate(qubit, update_gate);
             }
         }

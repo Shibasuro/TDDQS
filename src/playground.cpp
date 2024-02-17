@@ -199,13 +199,9 @@ void tdd_contract_test() {
 void tdd_circuit_test() {
     uint32_t num_qubits = 3;
     TDD_Circuit circ(num_qubits, "000");
-    // something is going wrong either with contraction or with choice of axes to contract over
+    // something seems to be wrong with cnot, always targets adjacent one?
     circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 0));
-    circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 0));
-    circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 1));
-    circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 1));
-    circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 2));
-    circ.add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), 2));
+    circ.add_instruction(Instruction(Instr_type::GATE, Gate(&controlled_not_gate, false), 0, 2));
     circ.simulate();
     for (size_t i = 0; i < 2; i++) {
         for (size_t j = 0; j < 2; j++) {
@@ -217,12 +213,109 @@ void tdd_circuit_test() {
     }
 }
 
+void toffoli_test() {
+    uint32_t num_qubits = 3;
+    TDD_Circuit circ(num_qubits, "101");
+    circ.toffoli(0,1,2);
+    circ.simulate();
+    for (size_t i = 0; i < 2; i++) {
+        for (size_t j = 0; j < 2; j++) {
+            for (size_t k = 0; k < 2; k++) {
+                cd value = circ.get_amplitude({i,j,k});
+                std::cout << "Amplitude of " << i << j << k << " = " << value << std::endl;
+            }
+        }
+    }
+}
+
+#define PI 3.14159265
+
+double acot(double x) {
+    return atan2(1, x);
+}
+
+double cheb(double i, double x) {
+    return cosh(i * acosh(x));
+}
+
+double gamma(double l, double delta) {
+    return 1/cheb(1/l, 1/delta);
+}
+
+void fixed_point_grovers_test() {
+    // small fixed point grovers test on two qubits effectively
+    TDD_Circuit circ(3, "000");
+    for (uint32_t i = 0; i < 2; i++) {
+        circ.h(i);
+    }
+    std::string marked_state = "01";
+
+    uint32_t steps = 8;
+    double delta = 0.5;
+    for (uint32_t i = 0; i < steps; i++) {
+        double l = 2 * steps + 1;
+        double alpha = 2 * acot((tan(2*PI*(i+1)/l)) * sqrt(1 - pow(gamma(l, delta), 2)));
+        double beta = -2 * acot((tan(2*PI*(steps-i)/l)) * sqrt(1 - pow(gamma(l, delta), 2)));
+        // repeat U and W steps times
+
+        // carry out U
+        for (uint32_t j = 0; j < marked_state.size(); j++) {
+            if (marked_state[j] == '0') {
+                circ.x(j);
+            }
+        }
+        circ.toffoli(0, 1, 2);
+        circ.rz(2, beta);
+        circ.toffoli(0, 1, 2);
+        for (uint32_t j = 0; j < marked_state.size(); j++) {
+            if (marked_state[j] == '0') {
+                circ.x(j);
+            }
+        }
+
+        // carry out W
+        for (uint32_t j = 0; j < marked_state.size(); j++) {
+            circ.h(j);
+        }
+        circ.x(0);
+        circ.rz(1, -alpha/2);
+        circ.cx(0, 1);
+        circ.cx(0, 2);
+        circ.rz(1, -alpha/2);
+        circ.rz(2, -alpha/2);
+        circ.cx(0, 1);
+        circ.cx(0, 2);
+        circ.x(0);
+        circ.rz(1, alpha);
+        for (uint32_t j = 0; j < marked_state.size(); j++) {
+            circ.h(j);
+        }
+    }
+    circ.simulate();
+
+    cd p_sum = 0;
+
+    for (size_t i = 0; i < 2; i++) {
+        for (size_t j = 0; j < 2; j++) {
+            for (size_t k = 0; k < 2; k++) {
+                cd value = circ.get_amplitude({i,j,k});
+                std::cout << "Probability of " << i << j << k << " = " << value * std::conj(value) << std::endl;
+                p_sum += value * std::conj(value);
+            }
+        }
+    }
+    std::cout << "Total probability: " << p_sum << std::endl;
+}
+
 int main()
 {
     //tn_test();
     //tdd_playground();
     // tdd_contract_test();
-    tdd_circuit_test();
+    // tdd_circuit_test();
+    // toffoli_test();
+    fixed_point_grovers_test();
+
 
     return 0;
 }

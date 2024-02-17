@@ -109,12 +109,12 @@ class TDD_Circuit {
                     // this is not problematic this time, but may be problematic if 
                     // contraction axes order gets skewed in the future - TODO
                     if (q1 < q2) {
-                        // imjn, bmcn -> ibjc // which is what we want
-                        state = contract_tdds(gate_TDD, state, {1,3}, {target_axis1, target_axis2});
+                        // bmcn, imjn -> bicj 
+                        state = contract_tdds(state, gate_TDD, {target_axis1, target_axis2}, {1,3});
                     }
                     else {
-                        // imjn, bmcn -> ibjc // which is what we want
-                        state = contract_tdds(gate_TDD, state, {1,3}, {target_axis2, target_axis1});
+                        // bmcn, imjn -> bicj
+                        state = contract_tdds(state, gate_TDD, {target_axis2, target_axis1}, {1,3});
                     }
                 }
             }
@@ -138,6 +138,60 @@ class TDD_Circuit {
 
         cd get_amplitude(xarray<size_t> indices) {
             return state.get_value(indices);
+        }
+
+        void x(uint32_t q1) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&pauli_x_gate, true), q1));
+        }
+
+        void y(uint32_t q1) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&pauli_y_gate, true), q1));
+        }
+
+        void z(uint32_t q1) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&pauli_z_gate, true), q1));
+        }
+
+        void h(uint32_t q1) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&hadamard_gate, true), q1));
+        }
+
+        void s(uint32_t q1) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&phase_gate, true), q1));
+        }
+
+        void t(uint32_t q1) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&t_gate, true), q1));
+        }
+
+        void t_d(uint32_t q1) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&t_dagger_gate, true), q1));
+        }
+
+        void rz(uint32_t q1, double theta) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&rz_gate, true, {theta}), q1));
+        }
+
+        void cx(uint32_t c1, uint32_t t1) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&controlled_not_gate, false), c1, t1));
+        }
+        
+        void toffoli(uint32_t c1, uint32_t c2, uint32_t t1) {
+            h(t1);
+            cx(c2, t1);
+            t_d(t1);
+            cx(c1, t1);
+            t(t1);
+            cx(c2, t1);
+            t_d(t1);
+            cx(c1, t1);
+            t(t1);
+            t(c2);
+            h(t1);
+            cx(c1, c2);
+            t(c1);
+            t_d(c2);
+            cx(c1, c2);
         }
 };
 
