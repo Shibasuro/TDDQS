@@ -31,6 +31,12 @@ xarray<cd> pauli_z_gate() {
     return {{cd(1,0), cd(0, 0)}, {cd(0, 0), cd(-1,0)}};
 }
 
+// square root of x gate
+xarray<cd> sx_gate() {
+    double h = 1/2;
+    return {{cd(h,h),cd(h,-h)}, {cd(h,-h), cd(h,h)}};
+}
+
 xarray<cd> hadamard_gate() {
     double r2 = pow(2, -0.5);
     return {{cd(r2, 0), cd(r2, 0)}, {cd(r2, 0), cd(-r2, 0)}};
@@ -126,9 +132,17 @@ xarray<cd> swap_gate() {
     return swap;
 }
 
-// may need to do swap gate here at some point
+// Parametric two qubit gates
 
+xarray<cd> controlled_u1_gate(std::vector<double> params) {
+    double lambda = params[0];
+    xarray<cd> controlled_u1 = zeros<cd>({4,4});
+    controlled_u1(0,0) = cd(1,0);
+    controlled_u1(1,1) = cd(1,0);
+    controlled_u1(2,2) = cd(1,0);
+    controlled_u1(3,3) = cd(cos(lambda),sin(lambda));
+    return controlled_u1;
+}
 
-// Parametric two qubit gates (not needed for universal quantum computation but may be worth playing with)
 
 #endif

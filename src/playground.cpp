@@ -10,8 +10,20 @@
 #include <xtensor/xrandom.hpp>
 #include "tdd_circuit.hpp"
 #include "simulator.hpp"
+#include "parser.hpp"
+
+#include <chrono>
 
 TDD_Map cache_map;
+
+void time_circuit(TDD_Circuit &circuit) {
+    auto t1 = std::chrono::high_resolution_clock::now();
+    circuit.simulate();
+    auto t2 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+
+    std::cout << "Time taken: " << ms_double.count() << "ms" << std::endl;
+}
 
 void tn_test() {
     // squbit gate + amplitude test
@@ -217,7 +229,7 @@ void toffoli_test() {
     uint32_t num_qubits = 3;
     TDD_Circuit circ(num_qubits, "101");
     circ.toffoli(0,1,2);
-    circ.simulate();
+    time_circuit(circ);
     for (size_t i = 0; i < 2; i++) {
         for (size_t j = 0; j < 2; j++) {
             for (size_t k = 0; k < 2; k++) {
@@ -291,7 +303,8 @@ void fixed_point_grovers_test() {
             circ.h(j);
         }
     }
-    circ.simulate();
+    //circ.simulate();
+    time_circuit(circ);
 
     cd p_sum = 0;
 
@@ -307,6 +320,24 @@ void fixed_point_grovers_test() {
     std::cout << "Total probability: " << p_sum << std::endl;
 }
 
+void parsing_test() {
+    TDD_Circuit circ = parse_circuit("/home/shibasuro/tn_project/TNQS/src/qasm_bench/qft16.qasm");
+    time_circuit(circ);
+    // std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
+    // std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;
+    // std::cout << "peak nodes: " << cache_map.peak_nodes() << std::endl;
+    // std::cout << "peak edges: " << cache_map.peak_edges() << std::endl;
+}
+
+// to record memory usage, can run with valgrind --tool=massif./build/apps/program
+// and then print out with ms_print <massif_file>
+// Is this a good way to record memory usage? increases time complexity
+// Might be better to track with node counts
+// Want to record peak memory usage
+
+// /usr/bin/time -v ./build/apps/program gives peak memory usage in KB?
+// can also add -v
+
 int main()
 {
     //tn_test();
@@ -314,7 +345,8 @@ int main()
     // tdd_contract_test();
     // tdd_circuit_test();
     // toffoli_test();
-    fixed_point_grovers_test();
+    // fixed_point_grovers_test();
+    parsing_test();
 
 
     return 0;

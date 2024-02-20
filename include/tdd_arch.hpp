@@ -10,6 +10,11 @@
 #include <math.h>
 #include "xtensor/xarray.hpp"
 #include <xtensor/xstrided_view.hpp>
+#include "utils.hpp"
+
+// FIXED buffer overflow - specifically on large circuits such as qft15/qft16
+// This is because of the potentialy for high reference counts for node and edge duplication
+// expanded to uint32_t to fix
 
 typedef std::complex<double> cd;
 using namespace xt;
@@ -35,7 +40,7 @@ class TDD_Edge {
         }
 
         bool operator==(const TDD_Edge &other) const {
-            return (target == other.get_target() && weight == other.get_weight());
+            return (target == other.get_target() && is_approx_equal(weight, other.get_weight()));
         }
 };
 
@@ -154,15 +159,30 @@ struct std::hash<TDD_Node> {
 class TDD_Map {
     private:
         // maps contain the item itself, and maps to the reference count
-        std::unordered_map<TDD_Edge, uint16_t> edge_map;
-        std::unordered_map<TDD_Node, uint16_t> node_map;
+        std::unordered_map<TDD_Edge, uint32_t> edge_map;
+        std::unordered_map<TDD_Node, uint32_t> node_map;
 
         // unique terminal node is defined here, -1 is chosen as axis index to ensure it is always last
         TDD_Node terminal_node = TDD_Node(-1);
 
+        uint64_t max_nodes = 0;
+        uint64_t max_edges = 0;
+        
+        void check_nodes() {
+            if (node_map.size() > max_nodes) {
+                max_nodes = node_map.size();
+            }
+        }
+        void check_edges() {
+            if (edge_map.size() > max_edges) {
+                max_edges = edge_map.size();
+            }
+        }
+
     public:
         // for adding new nodes and edges to the maps, returns pointer to node or edge
         const TDD_Node *add_node(TDD_Node node) {
+            check_nodes();
             auto pr = node_map.emplace(node, 1);
             auto it = pr.first;
             if (!pr.second) {
@@ -176,6 +196,7 @@ class TDD_Map {
         }
 
         const TDD_Edge *add_edge(TDD_Edge edge) {
+            check_edges();
             add_node(*(edge.get_target()));
             auto pr = edge_map.emplace(edge, 1);
             auto it = pr.first;
@@ -189,6 +210,7 @@ class TDD_Map {
         
         // for removing references
         void remove_node_ref(const TDD_Node *node, bool del = true) {
+            check_nodes();
             TDD_Node temp = *node;
             // if node is terminal, do not change refcount
             if (temp.is_terminal()) {
@@ -205,6 +227,7 @@ class TDD_Map {
         }
 
         void remove_edge_ref(const TDD_Edge *edge) {
+            check_edges();
             TDD_Edge temp = *edge;
             remove_node_ref(temp.get_target());
             auto it = edge_map.find(temp);
@@ -231,10 +254,18 @@ class TDD_Map {
         size_t num_unique_edges() {
             return edge_map.size();
         }
+
+        uint64_t peak_nodes() {
+            return max_nodes;
+        }
+
+        uint64_t peak_edges() {
+            return max_edges;
+        }
         
         // would be nice to be able to estimate memory cost here, idk how though
         // since nodes can have different numbers of successors, just measuring number of nodes/edges isnt a fair assessment
-
+        
 };
 
 extern TDD_Map cache_map;
@@ -314,7 +345,7 @@ class TDD {
         }
 
         bool operator==(const TDD &other) const {
-            return (in_weight == other.get_weight() && root == other.get_root());
+            return (is_approx_equal(in_weight, other.get_weight()) && root == other.get_root());
         }
 
         void cleanup() const {
@@ -366,8 +397,7 @@ TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint8_t axis = 0) {
         if (normalisation_weight != cd(0,0)) {
             next_weight = next_weight / normalisation_weight;
         }
-        // TODO need notion of approximately equal 0 here to account for floating point errors
-        else if (next_weight != cd(0,0)) {
+        else if (!is_approx_equal(next_weight, cd(0,0))) {
             normalisation_weight = next_weight;
             next_weight = 1;
         }
@@ -493,8 +523,7 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
         if (normalisation_weight != cd(0,0)) {
             next_weight = next_weight / normalisation_weight;
         }
-        // TODO need notion of approximately equal 0 here to account for floating point errors
-        else if (next_weight != cd(0,0)) {
+        else if (!is_approx_equal(next_weight, cd(0,0))) {
             normalisation_weight = next_weight;
             next_weight = 1;
         }
@@ -734,8 +763,7 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
             if (normalisation_weight != cd(0,0)) {
                 next_weight = next_weight / normalisation_weight;
             }
-            // TODO need notion of approximately equal 0 here to account for floating point errors
-            else if (next_weight != cd(0,0)) {
+            else if (!is_approx_equal(next_weight, cd(0,0))) {
                 normalisation_weight = next_weight;
                 next_weight = 1;
             }

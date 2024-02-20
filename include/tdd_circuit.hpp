@@ -59,13 +59,13 @@ class TDD_Circuit {
         // currently not needed to be updated as we are updating in sequence?
         std::vector<uint8_t> contraction_axes;
     
-        void initialise_state(std::string bitstring) {
+        void initialise_state(std::string bitstring = "", bool zero_init = true) {
             // for now this is just a rank n TDD, all qubits initialised to state 0
             svector<size_t> shape;
             xstrided_slice_vector slice;
             for (uint32_t i = 0; i < num_qubits; i++) {
                 shape.push_back(2);
-                if (bitstring[i] == '0') {
+                if (zero_init || bitstring[i] == '0') {
                     slice.push_back(0);
                 }
                 else {
@@ -121,9 +121,13 @@ class TDD_Circuit {
         }
 
     public:
+        TDD_Circuit(uint32_t qubits) {
+            num_qubits = qubits;
+            initialise_state();
+        }
         TDD_Circuit(uint32_t qubits, std::string bitstring) {
             num_qubits = qubits;
-            initialise_state(bitstring);
+            initialise_state(bitstring, false);
         }
 
         void add_instruction(Instruction instr) {
@@ -164,7 +168,11 @@ class TDD_Circuit {
             add_instruction(Instruction(Instr_type::GATE, Gate(&t_gate, true), q1));
         }
 
-        void t_d(uint32_t q1) {
+        void sx(uint32_t q1) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&sx_gate, true), q1));
+        }
+
+        void tdg(uint32_t q1) {
             add_instruction(Instruction(Instr_type::GATE, Gate(&t_dagger_gate, true), q1));
         }
 
@@ -175,22 +183,26 @@ class TDD_Circuit {
         void cx(uint32_t c1, uint32_t t1) {
             add_instruction(Instruction(Instr_type::GATE, Gate(&controlled_not_gate, false), c1, t1));
         }
+
+        void cu1(uint32_t c1, uint32_t t1, double lambda) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&controlled_u1_gate, false, {lambda}), c1, t1));
+        }
         
         void toffoli(uint32_t c1, uint32_t c2, uint32_t t1) {
             h(t1);
             cx(c2, t1);
-            t_d(t1);
+            tdg(t1);
             cx(c1, t1);
             t(t1);
             cx(c2, t1);
-            t_d(t1);
+            tdg(t1);
             cx(c1, t1);
             t(t1);
             t(c2);
             h(t1);
             cx(c1, c2);
             t(c1);
-            t_d(c2);
+            tdg(c2);
             cx(c1, c2);
         }
 };

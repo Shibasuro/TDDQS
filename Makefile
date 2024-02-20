@@ -1,11 +1,11 @@
 CXX      := -c++
-CXXFLAGS := -pedantic-errors -Wall -Wextra -Werror
+CXXFLAGS := -pedantic-errors -Wall -Wextra -Werror -std=c++17
 LDFLAGS  := -L/usr/lib -lstdc++ -lblas -llapack -lm
 BUILD    := ./build
 OBJ_DIR  := $(BUILD)/objects
 APP_DIR  := $(BUILD)/apps
 TARGET   := program
-INCLUDE  := -Iinclude/ -I/home/shibasuro/miniforge3/include/
+INCLUDE  := -Iinclude/ -I/home/shibasuro/miniforge3/include/ -I/home/shibasuro/qasmtools/include/
 SRC      :=                      \
    $(wildcard src/*.cpp)         \
 
