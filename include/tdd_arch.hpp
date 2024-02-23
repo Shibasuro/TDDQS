@@ -167,7 +167,7 @@ class TDD_Map {
 
         uint64_t max_nodes = 0;
         uint64_t max_edges = 0;
-        
+
         void check_nodes() {
             if (node_map.size() > max_nodes) {
                 max_nodes = node_map.size();
@@ -353,7 +353,36 @@ class TDD {
             cache_map.remove_node_ref(get_root());
         }
 
+        // only used for getting child with a physical index
+        TDD get_child_TDD(size_t index) {
+            // we only want to move one forward (as we are just indexing through the physical index,
+            // and want to leave the rest intact)
+            std::vector<size_t> new_shape = std::vector<size_t>(shape.begin() + 1, shape.end());
+            if (root->is_terminal() || root->get_axis_index() > 0) {
+                // if root is terminal or already past the physical index, just return
+                // progressing forward by one index in the shape
+                return TDD(root, in_weight, new_shape);
+            }
+            // otherwise root axis index is 0, and thus we need to shift to the successor
+            const TDD_Edge* successor = root->get_successor_ref(index);
+            const TDD_Node* new_node = successor->get_target();
+            cd edge_weight = successor->get_weight();
+            cd new_in_weight = in_weight * edge_weight;
+            return TDD(new_node, new_in_weight, new_shape);
+        }
+
 };
+
+std::vector<size_t> get_shape_as_vector(xarray<cd> &tensor) {
+    std::vector<size_t> shape;
+    svector<size_t> true_shape = tensor.shape();
+    for (size_t i = 0; i < true_shape.size(); i++) {
+        shape.push_back(true_shape[i]);
+    }
+
+    return shape;
+}
+
 
 // recursive implementation to convert arbitrary tensor into a TDD
 TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint8_t axis = 0) {
@@ -376,17 +405,12 @@ TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint8_t axis = 0) {
     cd weight = 1;
     cd normalisation_weight = 0;
     std::set<const TDD_Edge *> new_edge_set;
-    std::vector<size_t> new_shape;
+    std::vector<size_t> new_shape = get_shape_as_vector(tensor);
     for (size_t i = 0; i < dimension; i++) {
         sv[0] = i;
         xarray<cd> new_tensor = strided_view(tensor, sv);
 
         TDD child = convert_tensor_to_TDD(new_tensor, axis + 1);
-        if (i == 0) {
-            // then take the shape and append the new dimension to the front
-            new_shape = child.get_shape();
-            new_shape.insert(new_shape.begin(), dimension);
-        }
 
         const TDD_Node *next_node = child.get_root();
         cache_map.remove_node_ref(next_node, false);
@@ -442,7 +466,6 @@ TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint8_t axis = 0) {
 // TODO can change set checking to ensure all the same to stop adding them once there are
 // two distinct elements in the set (at that point there is a guarantee they wont all be the same,
 // so can save on memory by no longer adding to the set)
-
 // assumes all TDDs have the same index set and axis (i.e. same shape)
 // Addition is a shape preserving operation
 TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
@@ -590,25 +613,51 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
     if (first.get_root()->is_terminal() && second.get_root()->is_terminal()) {
         // compute the new weight post contraction
         double contraction_product = 1;
-        std::set<uint8_t> removed_f_axes;
-        std::set<uint8_t> removed_s_axes;
         for (size_t i = 0; i < first_axes.size(); i++) {
             contraction_product *= f_shape[first_axes[i]];
-            removed_f_axes.insert(first_axes[i]);
-            removed_s_axes.insert(second_axes[i]);
         }
         cd new_weight = first.get_weight() * second.get_weight() * contraction_product;
 
         // compute new shape (ordered by first TDDs axes first, followed by second TDDs axes)
+        // hould be first TDDs axes before first removed axes,
+        // second TDDs axes before second_removed_axes[0] and so on
         std::vector<size_t> new_shape;
-        for (uint8_t i = first_axis; i < f_shape.size(); i++) {
-            if (removed_f_axes.find(i) == removed_f_axes.end()) {
-                new_shape.push_back(f_shape[i]);
+        size_t remaining = first_axes.size();
+        size_t i = first_axis;
+        size_t j = second_axis;
+        size_t first_axis_index = 0;
+        size_t second_axis_index = 0;
+        while (i < f_shape.size() || j < s_shape.size()) {
+            if (second_axis_index == remaining) {
+                // then we have reached the end, just loop through i and j until the end is reached
+                if (i < f_shape.size()) {
+                    new_shape.push_back(f_shape[i]);
+                    i++;
+                }
+                else {
+                    new_shape.push_back(s_shape[j]);
+                    j++;
+                }
             }
-        }
-        for (uint8_t i = second_axis; i < s_shape.size(); i++) {
-            if (removed_s_axes.find(i) == removed_s_axes.end()) {
-                new_shape.push_back(s_shape[i]);
+            else if (first_axis_index == second_axis_index) {
+                if (i < first_axes[first_axis_index]) {
+                    new_shape.push_back(f_shape[i]);
+                    i++;
+                }
+                else {
+                    first_axis_index++;
+                    i++;
+                }
+            }
+            else {
+                if (j < second_axes[second_axis_index]) {
+                    new_shape.push_back(s_shape[j]);
+                    j++;
+                }
+                else {
+                    second_axis_index++;
+                    j++;
+                }
             }
         }
 
@@ -823,6 +872,73 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
 
     const TDD_Node *new_node_ptr = cache_map.add_node(new_node);
     return TDD(new_node_ptr, weight, shape);
+}
+
+// convert TDD to a tensor
+xarray<cd> convert_TDD_to_tensor(TDD tdd) {
+    xarray<cd> tensor = zeros<cd>(tdd.get_shape());
+    const TDD_Node* root = tdd.get_root();
+    if (root->is_terminal()) {
+        tensor = full_like(tensor, tdd.get_weight());
+        tdd.cleanup();
+        return tensor;
+    }
+
+    size_t target_dimension = tdd.get_shape().size();
+    // process nodes iteratively
+    std::queue<const TDD_Node*> nodes_to_process;
+    std::queue<cd> cumulative_weights;
+    std::queue<xstrided_slice_vector> index_sets;
+    nodes_to_process.push(root);
+    cumulative_weights.push(tdd.get_weight());
+    xstrided_slice_vector initial_index_set;
+    // account for initial skipped layers
+    for (uint32_t i = 0; i < root->get_axis_index(); i++) {
+        initial_index_set.push_back(all());
+    }
+    index_sets.push(initial_index_set);
+    while (!nodes_to_process.empty()) {
+        const TDD_Node* current_node = nodes_to_process.front();
+        nodes_to_process.pop();
+        cd cumulative_weight = cumulative_weights.front();
+        cumulative_weights.pop();
+        xstrided_slice_vector index_set = index_sets.front();
+        index_sets.pop();
+
+        size_t dimension = current_node->get_dimension();
+        for (size_t i = 0; i < dimension; i++) {
+            const TDD_Edge* new_edge = current_node->get_successor_ref(i);
+            const TDD_Node* new_node = new_edge->get_target();
+            // update cumulative weights and index set
+            cd new_weight = new_edge->get_weight() * cumulative_weight;
+            xstrided_slice_vector new_index_set = index_set;
+            new_index_set.push_back(i);
+
+            if (new_node->is_terminal()) {
+                // if new node is terminal, then we want to fully populate all items it refers to
+                // we don't need to push anything then, and can now just fully populate
+                while (new_index_set.size() < target_dimension) {
+                    new_index_set.push_back(all());
+                }
+                filtration(strided_view(tensor, new_index_set), true) = new_weight;
+            }
+            else {
+                // need to also push back skipped layers
+                uint32_t axis_diff = new_node->get_axis_index() - current_node->get_axis_index();
+                for (uint32_t i = 1; i < axis_diff; i++) {
+                    new_index_set.push_back(all());
+                }
+                // otherwise keep traversing
+                nodes_to_process.push(new_node);
+                cumulative_weights.push(new_weight);
+                index_sets.push(new_index_set);
+            }
+        }
+    }
+
+    // clean up the tdd, could this be more efficient by deleting as we go along above?
+    tdd.cleanup();
+    return tensor;
 }
 
 #endif

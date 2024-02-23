@@ -321,12 +321,38 @@ void fixed_point_grovers_test() {
 }
 
 void parsing_test() {
-    TDD_Circuit circ = parse_circuit("/home/shibasuro/tn_project/TNQS/src/qasm_bench/qft16.qasm");
+    MPS_Circuit circ = parse_circuit("/home/shibasuro/tn_project/TNQS/src/qasm_bench/qft22.qasm");
     time_circuit(circ);
+    xarray<size_t> indices = zeros<size_t>({circ.get_num_qubits()});
+    cd amp = circ.get_amplitude(indices);
+    double prob = std::real(amp * std::conj(amp));
+    std::cout << "all 0 prob: " << prob << std::endl;
     // std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
     // std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;
     // std::cout << "peak nodes: " << cache_map.peak_nodes() << std::endl;
     // std::cout << "peak edges: " << cache_map.peak_edges() << std::endl;
+}
+
+void tdd_conversion_test() {
+    xarray<cd> gate = zeros<cd>({4,4});
+    gate(0,0) = cd(1,0);
+    gate(2,1) = cd(1,0);
+    gate(1,2) = cd(1,0);
+    gate(3,1) = cd(1,0);
+    gate(0,3) = cd(1,0);
+    gate(2,2) = cd(1,0);
+    gate(3,3) = cd(1,0);
+    gate(3,0) = cd(1,0);
+    std::cout << gate << std::endl;
+    TDD gate_TDD = convert_tensor_to_TDD(gate);
+    xarray<cd> gate2 = convert_TDD_to_tensor(gate_TDD);
+    if (gate == gate2) {
+        std::cout << "success" << std::endl;
+    }
+    else {
+        std::cout << "failure" << std::endl;
+        std::cout << gate2 << std::endl;
+    }
 }
 
 // to record memory usage, can run with valgrind --tool=massif./build/apps/program
@@ -347,6 +373,7 @@ int main()
     // toffoli_test();
     // fixed_point_grovers_test();
     parsing_test();
+    // tdd_conversion_test();
 
 
     return 0;
