@@ -46,7 +46,7 @@ class TDD_Edge {
 
 class TDD_Node {
     private:
-        uint8_t axis_index;
+        uint16_t axis_index;
         std::vector<const TDD_Edge *> successors;
 
         // trade off between maintaining full vector of successors (dimension * 64 bits)
@@ -78,7 +78,7 @@ class TDD_Node {
     public:
 
         TDD_Node(){}
-        TDD_Node(uint8_t axis) {
+        TDD_Node(uint16_t axis) {
             axis_index = axis;
         }
 
@@ -90,7 +90,7 @@ class TDD_Node {
             return successors.empty();
         }
 
-        uint8_t get_axis_index() const {
+        uint16_t get_axis_index() const {
             return axis_index;
         }
 
@@ -132,6 +132,67 @@ class TDD_Node {
             return get_weight(current_index) * next->get_value(indices);
         }
 
+        double get_probability_sum(uint16_t qubit, uint32_t val, std::vector<size_t> shape) const {
+            if (is_terminal()) {
+                return 1;
+            }
+
+            uint16_t axis_index = get_axis_index();
+            double prob_sum = 0;
+            if (axis_index == qubit) {
+                const TDD_Node *next = get_successor_ref(val)->get_target();
+                cd weight = get_weight(val);
+                double w = std::real(std::conj(weight) * weight);
+                double prod = 1;
+                std::vector<size_t> new_shape = std::vector<size_t>(shape.begin() + 1, shape.end());
+                if (next->is_terminal()) {
+                    for (uint32_t i = 1; i < shape.size(); i++) {
+                        prod *= shape[i];
+                    }
+                }
+                else {
+                    uint16_t next_axis_index = next->get_axis_index();
+                    uint16_t diff = next_axis_index - axis_index;
+                    // account for skipped axes
+                    for (uint32_t i = 1; i < diff; i++) {
+                        prod *= shape[i];
+                    }
+                    new_shape = std::vector<size_t>(shape.begin() + diff, shape.end());
+                }
+                return w * prod * next->get_probability_sum(qubit, val, new_shape);
+            }
+            for (uint32_t i = 0; i < get_dimension(); i++) {
+                const TDD_Node *next = get_successor_ref(i)->get_target();
+                cd weight = get_weight(i);
+                double w = std::real(std::conj(weight) * weight);
+                std::vector<size_t> new_shape = std::vector<size_t>(shape.begin() + 1, shape.end());
+                double prod = 1;
+                if (next->is_terminal()) {
+                    for (uint32_t i = 1; i < shape.size(); i++) {
+                        // if we skip the qubit, need to account for that
+                        if (axis_index + i != qubit) {
+                            prod *= shape[i];
+                        }
+                    }
+                }
+                else {
+                    uint16_t next_axis_index = next->get_axis_index();
+                    uint16_t diff = next_axis_index - axis_index;
+                    // account for skipped axes
+                    for (uint32_t i = 1; i < diff; i++) {
+                        // if we skip the valued qubit, then don't multiply by that layer
+                        if (axis_index + i != qubit) {
+                            prod *= shape[i];
+                        }
+                    }
+                    new_shape = std::vector<size_t>(shape.begin() + diff, shape.end());
+                }
+                prob_sum += w * prod * next->get_probability_sum(qubit, val, new_shape);
+            }
+
+            return prob_sum;
+        }
+
         bool operator==(const TDD_Node &other) const {
             return (axis_index == other.get_axis_index() && successors == other.get_successors());
         }
@@ -151,7 +212,7 @@ struct std::hash<TDD_Node> {
             total ^= hash<const TDD_Edge *>()(t.get_successor_ref(i)) << (i % 3);
             total = total >> (i % 3);
         }
-        return total ^ (hash<uint8_t>()(t.get_axis_index()) << 1);
+        return total ^ (hash<uint16_t>()(t.get_axis_index()) << 1);
     }
 };
 
@@ -339,9 +400,17 @@ class TDD {
             if (in_weight == cd{0,0}) {
                 return 0;
             }
-            uint8_t axis_index = root->get_axis_index();
+            uint16_t axis_index = root->get_axis_index();
             const TDD_Node *next = root->get_successor_ref(indices[axis_index])->get_target();
             return in_weight * root->get_weight(indices[axis_index]) * next->get_value(indices);
+        }
+
+        double get_probability_sum(uint16_t qubit, uint32_t val) const {
+            double w = std::real(std::conj(in_weight) * in_weight);
+            if (root->is_terminal()) {
+                return 1;
+            }
+            return w * root->get_probability_sum(qubit, val, get_shape());
         }
 
         bool operator==(const TDD &other) const {
@@ -385,7 +454,7 @@ std::vector<size_t> get_shape_as_vector(xarray<cd> &tensor) {
 
 
 // recursive implementation to convert arbitrary tensor into a TDD
-TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint8_t axis = 0) {
+TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint16_t axis = 0) {
 
     if (tensor.size() == 1) {
         // if terminal node, then just return trivial TDD with in_weight equal to weight
@@ -472,7 +541,7 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
     std::vector<const TDD_Node *> roots;
     std::set<const TDD_Node *> root_set;
     cd weight_sum = 0;
-    uint8_t min_axis_index = tdds[0].get_root()->get_axis_index();
+    uint16_t min_axis_index = tdds[0].get_root()->get_axis_index();
     size_t dimension = tdds[0].get_root()->get_dimension();
     for (TDD tdd : tdds) {
         const TDD_Node *current_root = tdd.get_root();
@@ -485,7 +554,7 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
         weight_sum += tdd.get_weight();
 
         // find minimum axis index to use as next level of resulting TDD
-        uint8_t axis_index = current_root->get_axis_index();
+        uint16_t axis_index = current_root->get_axis_index();
         if (axis_index < min_axis_index) {
             min_axis_index = axis_index;
             dimension = current_root->get_dimension();
@@ -596,7 +665,7 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
 // followed by indices before first contraction index for second TDD, and so on
 // e.g. T1 (a, b, c) T2 (d, b, e) contracted on d results in T (a, d, c, e)
 
-TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std::vector<uint8_t> second_axes, uint8_t axis = 0, bool clear = true) {
+TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std::vector<uint16_t> second_axes, uint16_t axis = 0, bool clear = true) {
 
     std::vector<size_t> f_shape = first.get_shape();
     std::vector<size_t> s_shape = second.get_shape();
@@ -606,8 +675,8 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
     // also should not affect efficiency very much actually, as depth is assumed to not be too high
     // If not using this method, may require more complex implementation
     // or different index order -- TODO investigate
-    uint8_t first_axis = first.get_first_nonzero_index();
-    uint8_t second_axis = second.get_first_nonzero_index();
+    uint16_t first_axis = first.get_first_nonzero_index();
+    uint16_t second_axis = second.get_first_nonzero_index();
     
     // check if both TDDs are trivial (i.e. root is terminal)
     if (first.get_root()->is_terminal() && second.get_root()->is_terminal()) {
@@ -729,9 +798,9 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
         std::vector<size_t> first_succ_shape = f_shape;
         std::vector<size_t> second_succ_shape = s_shape;
 
-        std::vector<uint8_t> new_first_axes = first_axes;
-        std::vector<uint8_t> new_second_axes = second_axes;
-        uint8_t new_axis = axis;
+        std::vector<uint16_t> new_first_axes = first_axes;
+        std::vector<uint16_t> new_second_axes = second_axes;
+        uint16_t new_axis = axis;
 
         // need to select new successors depending on indexing_scheme
         // also determines which node pointers to progress
@@ -758,8 +827,8 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
                 second_succ_shape[second_axis] = 0;
 
                 // drop first value as we are contracting that axis at this step
-                new_first_axes = std::vector<uint8_t>(first_axes.begin() + 1, first_axes.end());
-                new_second_axes = std::vector<uint8_t>(second_axes.begin() + 1, second_axes.end());
+                new_first_axes = std::vector<uint16_t>(first_axes.begin() + 1, first_axes.end());
+                new_second_axes = std::vector<uint16_t>(second_axes.begin() + 1, second_axes.end());
                 break;
             case 1:
                 // Index First
@@ -875,6 +944,8 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint8_t> first_axes, std:
 }
 
 // convert TDD to a tensor
+// TODO something wrong here - think the problem is when there is more redundancy
+// CONFIRMED SOME VALUES ARE NOT GETTING CHANGED FROM 0
 xarray<cd> convert_TDD_to_tensor(TDD tdd) {
     xarray<cd> tensor = zeros<cd>(tdd.get_shape());
     const TDD_Node* root = tdd.get_root();
@@ -920,7 +991,8 @@ xarray<cd> convert_TDD_to_tensor(TDD tdd) {
                 while (new_index_set.size() < target_dimension) {
                     new_index_set.push_back(all());
                 }
-                filtration(strided_view(tensor, new_index_set), true) = new_weight;
+                auto tr = strided_view(tensor, new_index_set);
+                tr = new_weight;
             }
             else {
                 // need to also push back skipped layers

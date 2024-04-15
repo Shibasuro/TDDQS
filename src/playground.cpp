@@ -321,12 +321,14 @@ void fixed_point_grovers_test() {
 }
 
 void parsing_test() {
-    MPS_Circuit circ = parse_circuit("/home/shibasuro/tn_project/TNQS/src/qasm_bench/qft22.qasm");
+    MPS_Circuit circ = parse_circuit("/home/shibasuro/tn_project/TNQS/src/qasm_bench/qft16.qasm");
     time_circuit(circ);
     xarray<size_t> indices = zeros<size_t>({circ.get_num_qubits()});
     cd amp = circ.get_amplitude(indices);
     double prob = std::real(amp * std::conj(amp));
     std::cout << "all 0 prob: " << prob << std::endl;
+    double total_prob = circ.get_qubit_probability(8, 0);
+    std::cout << "probability of whatever: " << total_prob << std::endl;
     // std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
     // std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;
     // std::cout << "peak nodes: " << cache_map.peak_nodes() << std::endl;
@@ -335,14 +337,11 @@ void parsing_test() {
 
 void tdd_conversion_test() {
     xarray<cd> gate = zeros<cd>({4,4});
-    gate(0,0) = cd(1,0);
-    gate(2,1) = cd(1,0);
-    gate(1,2) = cd(1,0);
-    gate(3,1) = cd(1,0);
-    gate(0,3) = cd(1,0);
-    gate(2,2) = cd(1,0);
-    gate(3,3) = cd(1,0);
-    gate(3,0) = cd(1,0);
+    for (uint32_t i = 0; i < 4; i++) {
+        for (uint32_t j = 0; j < 4; j++) {
+            gate(i,j) = cd(rand() / (rand() + 0.5),rand() / (rand() + 0.5));
+        }
+    }
     std::cout << gate << std::endl;
     TDD gate_TDD = convert_tensor_to_TDD(gate);
     xarray<cd> gate2 = convert_TDD_to_tensor(gate_TDD);

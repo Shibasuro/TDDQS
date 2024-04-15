@@ -107,6 +107,11 @@ MPS_Circuit parse_circuit(std::string fname) {
                 }
             }
         }
+        else if (dynamic_cast<ast::MeasureStmt*>(&(**it)) != nullptr) {
+            auto measure_stmt = dynamic_cast<ast::MeasureStmt*>(&(**it));
+            uint32_t qubit = measure_stmt->q_arg().offset().value();
+            circ.add_instruction(Instruction(Instr_type::MEASUREMENT, qubit));
+        }
     }
     return circ;
 }

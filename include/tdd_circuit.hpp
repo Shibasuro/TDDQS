@@ -57,7 +57,7 @@ class TDD_Circuit {
         std::vector<Instruction> instructions;
         // stores current axes to contract over for each qubit
         // currently not needed to be updated as we are updating in sequence?
-        std::vector<uint8_t> contraction_axes;
+        std::vector<uint16_t> contraction_axes;
     
         virtual void initialise_state(std::string bitstring = "", bool zero_init = true) {
             // for now this is just a rank n TDD, all qubits initialised to state 0
@@ -87,7 +87,7 @@ class TDD_Circuit {
                     xarray<cd> gate = instr.get_gate().get_gate();
                     TDD gate_TDD = convert_tensor_to_TDD(gate);
                     uint32_t target = instr.get_q1();
-                    uint8_t target_axis = contraction_axes[target];
+                    uint16_t target_axis = contraction_axes[target];
 
                     // this should leave axis in correct place
                     state = contract_tdds(state, gate_TDD, {target_axis}, {1});
@@ -103,8 +103,8 @@ class TDD_Circuit {
                     TDD gate_TDD = convert_tensor_to_TDD(gate);
                     uint32_t q1 = instr.get_q1();
                     uint32_t q2 = instr.get_q2();
-                    uint8_t target_axis1 = contraction_axes[q1];
-                    uint8_t target_axis2 = contraction_axes[q2];
+                    uint16_t target_axis1 = contraction_axes[q1];
+                    uint16_t target_axis2 = contraction_axes[q2];
                     // for contract_tdds, both sets of axes are assumed to be in ascending order
                     // this is not problematic this time, but may be problematic if 
                     // contraction axes order gets skewed in the future - TODO
@@ -219,6 +219,13 @@ class MPS_Circuit : public TDD_Circuit {
         uint32_t num_qubits;
         std::vector<TDD> state;
         std::vector<Instruction> instructions;
+        std::default_random_engine generator;
+
+        double uniform_rand_in_range(double min, double max) {
+            std::uniform_real_distribution<double> distribution(min, max);
+            return distribution(generator);
+        }
+
         void initialise_state(std::string bitstring = "", bool zero_init = true) override {
             // MPS State of N TDDs, all qubits initialised to state 0
             for (uint32_t i = 0; i < num_qubits; i++) {
@@ -237,6 +244,7 @@ class MPS_Circuit : public TDD_Circuit {
                 tensor_state.reshape(shape);
                 state.push_back(convert_tensor_to_TDD(tensor_state));
             }
+            generator.seed(time(NULL));
         }
 
         void apply_instruction(Instruction instr) override {
@@ -275,9 +283,9 @@ class MPS_Circuit : public TDD_Circuit {
                     // be determined by qubit number
 
                     // index will be either 1 or 2 as it is MPS, each is either {2,1} or {2,1,1}
-                    uint8_t q1_to_q2_bond_index;
-                    uint8_t q2_to_q1_bond_index;
-                    uint8_t gate_contraction_index = 1;
+                    uint16_t q1_to_q2_bond_index;
+                    uint16_t q2_to_q1_bond_index;
+                    uint16_t gate_contraction_index = 1;
                     if (q1 < q2) {
                         if (q1 == 0) {
                             q1_to_q2_bond_index = 1;
@@ -418,6 +426,10 @@ class MPS_Circuit : public TDD_Circuit {
                     
                 }
             }
+            else if (instr.get_type() == Instr_type::MEASUREMENT) {
+                uint32_t target = instr.get_q1();
+                measure(target);
+            }
         }
     public:
         MPS_Circuit(uint32_t qubits) {
@@ -431,15 +443,62 @@ class MPS_Circuit : public TDD_Circuit {
         }
 
         cd get_amplitude(xarray<size_t> indices) override {
-            // TODO implement the contraction of the MPS TDD state
             // these indices should all be 0 or 1 (as they are the physical indices
             // and thus dimension 2)
             TDD amalgam = state[0].get_child_TDD(indices[0]);
             for (size_t i = 1; i < num_qubits; i++) {
                 TDD next_to_contract = state[i].get_child_TDD(indices[i]);
-                amalgam = contract_tdds(amalgam, next_to_contract, {0}, {0});
+                amalgam = contract_tdds(amalgam, next_to_contract, {0}, {0}, 0, false);
             }
             return amalgam.get_weight();
+        }
+
+        // val can be either 0 or 1
+        double get_qubit_probability(uint16_t qubit, uint32_t val) {
+            // whereby we can contract from the left and the right
+            // this is not efficient as we lose the compression of MPS
+            // (2,a) (2,a,b) (2,b,c) (2,c)
+            // (2,2,b) (2,b,c) (2,c)
+            // (2,2,2,c) (2,c)
+            // (2,2,2,2)
+            TDD amalgam = state[0];
+            for (uint16_t i = 1; i < num_qubits; i++) {
+                TDD next_to_contract = state[i];
+                amalgam = contract_tdds(amalgam, next_to_contract, {i}, {1}, 0, false);
+            }
+            // this gives the statevector in amalgam
+            // now compute sum of relevant amplitudes
+            return amalgam.get_probability_sum(qubit, val);
+        }
+
+        std::vector<double> get_qubit_probabilities(std::vector<uint16_t> qubits, std::vector<uint32_t> vals) {
+            TDD amalgam = state[0];
+            for (uint16_t i = 1; i < num_qubits; i++) {
+                TDD next_to_contract = state[i];
+                amalgam = contract_tdds(amalgam, next_to_contract, {i}, {1}, 0, false);
+            }
+            std::vector<double> probabilities;
+            for (uint32_t i = 0; i < qubits.size(); i++) {
+                probabilities.push_back(amalgam.get_probability_sum(qubits[i], vals[i]));
+            }
+            return probabilities;
+        }
+
+        void measure(uint16_t qubit) {
+            double p0 = get_qubit_probability(qubit, 0);
+            double rand_val = uniform_rand_in_range(0.0, 1.0);
+            if (rand_val <= p0) {
+                // then we have measured a 0, so update gamma accordingly
+                std::vector<double> p0_v({p0});
+                Gate update_gate(&update_to_0, true, p0_v);
+                apply_instruction(Instruction(Instr_type::GATE, update_gate, qubit));
+            }
+            else {
+                // otherwise we have measured a 1, so update gamma accordingly
+                std::vector<double> p1_v({1 - p0});
+                Gate update_gate(&update_to_1, true, p1_v);
+                apply_instruction(Instruction(Instr_type::GATE, update_gate, qubit));
+            }
         }
 };
 
