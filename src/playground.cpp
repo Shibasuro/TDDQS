@@ -321,14 +321,15 @@ void fixed_point_grovers_test() {
 }
 
 void parsing_test() {
-    MPS_Circuit circ = parse_circuit("/home/shibasuro/tn_project/TNQS/src/qasm_bench/qft16.qasm");
+    MPS_Circuit circ = parse_circuit("/home/shibasuro/tn_project/TNQS/src/qasm_bench/qft22.qasm");
     time_circuit(circ);
     xarray<size_t> indices = zeros<size_t>({circ.get_num_qubits()});
+    indices(0) = 1;
     cd amp = circ.get_amplitude(indices);
     double prob = std::real(amp * std::conj(amp));
     std::cout << "all 0 prob: " << prob << std::endl;
-    double total_prob = circ.get_qubit_probability(8, 0);
-    std::cout << "probability of whatever: " << total_prob << std::endl;
+    double total_prob = circ.get_qubit_probability(7, 0);
+    std::cout << "probability of qubit 8 being 0: " << total_prob << std::endl;
     // std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
     // std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;
     // std::cout << "peak nodes: " << cache_map.peak_nodes() << std::endl;

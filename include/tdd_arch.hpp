@@ -665,7 +665,7 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
 // followed by indices before first contraction index for second TDD, and so on
 // e.g. T1 (a, b, c) T2 (d, b, e) contracted on d results in T (a, d, c, e)
 
-TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std::vector<uint16_t> second_axes, uint16_t axis = 0, bool clear = true) {
+TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std::vector<uint16_t> second_axes, uint16_t axis = 0, bool clear = true, bool kc = false) {
 
     std::vector<size_t> f_shape = first.get_shape();
     std::vector<size_t> s_shape = second.get_shape();
@@ -688,7 +688,7 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
         cd new_weight = first.get_weight() * second.get_weight() * contraction_product;
 
         // compute new shape (ordered by first TDDs axes first, followed by second TDDs axes)
-        // hould be first TDDs axes before first removed axes,
+        // should be first TDDs axes before first removed axes,
         // second TDDs axes before second_removed_axes[0] and so on
         std::vector<size_t> new_shape;
         size_t remaining = first_axes.size();
@@ -845,7 +845,12 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
                 // Index Second
                 if (second_axis >= s_root->get_axis_index() && !s_root->is_terminal()) {
                     second_succ_node = s_root->get_successor_ref(i)->get_target();
-                    second_succ_weight *= s_root->get_successor_ref(i)->get_weight();
+                    if (kc) {
+                        second_succ_weight *= std::conj(s_root->get_successor_ref(i)->get_weight());
+                    }
+                    else {
+                        second_succ_weight *= s_root->get_successor_ref(i)->get_weight();
+                    }
                 }
                 /// increment by 1 as we progress forward one index
                 new_axis += 1;
@@ -857,7 +862,7 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
         TDD first_successor = TDD(first_succ_node, first_succ_weight, first_succ_shape);
         TDD second_successor = TDD(second_succ_node, second_succ_weight, second_succ_shape);
 
-        TDD child = contract_tdds(first_successor, second_successor, new_first_axes, new_second_axes, new_axis, false);
+        TDD child = contract_tdds(first_successor, second_successor, new_first_axes, new_second_axes, new_axis, false, kc);
 
         // if we are contracting (scheme 0) then we only need to store the new tdds and add them
         if (indexing_scheme == 0) {
@@ -1011,6 +1016,12 @@ xarray<cd> convert_TDD_to_tensor(TDD tdd) {
     // clean up the tdd, could this be more efficient by deleting as we go along above?
     tdd.cleanup();
     return tensor;
+}
+
+// uses contract_tdds to compute kronecker product of tdd and tdd_conjugate
+TDD kronecker_conjugate(TDD tdd) {
+    TDD tdd2 = TDD(tdd.get_root(), std::conj(tdd.get_weight()), tdd.get_shape());
+    return contract_tdds(tdd, tdd2, {}, {}, 0, false, true);
 }
 
 #endif

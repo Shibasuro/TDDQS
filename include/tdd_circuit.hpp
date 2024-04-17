@@ -438,6 +438,12 @@ class MPS_Circuit : public TDD_Circuit {
             initialise_state();
         }
 
+        MPS_Circuit(uint32_t qubits, std::string bitstring) {
+            TDD_Circuit();
+            num_qubits = qubits;
+            initialise_state(bitstring, false);
+        }
+
         uint32_t get_num_qubits() {
             return num_qubits;
         }
@@ -453,9 +459,8 @@ class MPS_Circuit : public TDD_Circuit {
             return amalgam.get_weight();
         }
 
-        // val can be either 0 or 1
-        double get_qubit_probability(uint16_t qubit, uint32_t val) {
-            // whereby we can contract from the left and the right
+        double get_inefficient_qubit_probability(uint16_t qubit, uint32_t val) {
+            // old, inefficient method
             // this is not efficient as we lose the compression of MPS
             // (2,a) (2,a,b) (2,b,c) (2,c)
             // (2,2,b) (2,b,c) (2,c)
@@ -469,6 +474,47 @@ class MPS_Circuit : public TDD_Circuit {
             // this gives the statevector in amalgam
             // now compute sum of relevant amplitudes
             return amalgam.get_probability_sum(qubit, val);
+        }
+
+        // val can be either 0 or 1
+        // MORE EFFICIENT METHOD HERE
+        double get_qubit_probability(uint16_t qubit, uint32_t val) {
+            // calculate initial term, contracting from the right
+            // TODO make sure that this does not permanently create extra nodes
+            // nor does it delete anything in the state
+            TDD q_current;
+            if (qubit == num_qubits - 1) {
+                q_current = kronecker_conjugate(state[num_qubits - 1].get_child_TDD(val));
+            }
+            else {
+                std::vector<TDD> tdds;
+                tdds.push_back(kronecker_conjugate(state[num_qubits - 1].get_child_TDD(0)));
+                tdds.push_back(kronecker_conjugate(state[num_qubits - 1].get_child_TDD(1)));
+                q_current = add_tdds(tdds, false);
+            }
+            for (int16_t i = num_qubits - 2; i >= 0; i--) {
+                TDD q_temp;
+                if (i == qubit) {
+                    // then we can index by val
+                    q_temp = kronecker_conjugate(state[i].get_child_TDD(val));
+                }
+                else {
+                    // TODO maybe investigate whether doing addition then contraction 
+                    // or contraction then addition is faster
+                    std::vector<TDD> tdds;
+                    tdds.push_back(kronecker_conjugate(state[i].get_child_TDD(0)));
+                    tdds.push_back(kronecker_conjugate(state[i].get_child_TDD(1)));
+                    q_temp = add_tdds(tdds);
+                }
+                if (i > 0) {
+                    q_current = contract_tdds(q_temp, q_current, {1}, {0});
+                }
+                else {
+                    q_current = contract_tdds(q_temp, q_current, {0}, {0});
+                }
+            }
+            // now q_current should contain the final weight
+            return std::real(q_current.get_weight());
         }
 
         std::vector<double> get_qubit_probabilities(std::vector<uint16_t> qubits, std::vector<uint32_t> vals) {
