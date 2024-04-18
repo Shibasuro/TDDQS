@@ -83,7 +83,8 @@ MPS_Circuit parse_circuit(std::string fname) {
                     if (gate_type == "cx") {
                         circ.cx(q1_shifted, q2);
                     }
-                    else if (gate_type == "cu1") {
+                    // cp and cu1 are the same gate
+                    else if (gate_type == "cu1" || gate_type == "cp") {
                         double lambda = gate->carg(0).constant_eval().value();
                         circ.cu1(q1_shifted, q2, lambda);
                     }

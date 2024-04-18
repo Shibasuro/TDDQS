@@ -345,6 +345,7 @@ class MPS_Circuit : public TDD_Circuit {
                     // mncb, ijmn -> ijcb
                     // mand, ijmn -> ijad
                     // effectively want final output to be ibjc, ibjd or iajd
+                    // so we need to do reshapes/swapaxes
 
                     // 2. Convert TDD to tensor for SVD
 

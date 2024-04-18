@@ -134,6 +134,7 @@ xarray<cd> swap_gate() {
 
 // Parametric two qubit gates
 
+// this is equivalent to a controlled phase gate
 xarray<cd> controlled_u1_gate(std::vector<double> params) {
     double lambda = params[0];
     xarray<cd> controlled_u1 = zeros<cd>({4,4});

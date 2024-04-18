@@ -355,6 +355,21 @@ void tdd_conversion_test() {
     }
 }
 
+void swap_axes_test() {
+    xarray<cd> matrix = zeros<cd>({1,2,3});
+    matrix(0,0,0) = 2;
+    matrix(0,0,1) = 0;
+    matrix(0,0,2) = 3;
+    matrix(0,1,0) = 4;
+    matrix(0,1,1) = 0;
+    matrix(0,1,2) = 1;
+    std::cout << matrix << std::endl;
+    TDD tdd = convert_tensor_to_TDD(matrix);
+    TDD swapped = swap_adjacent_axes(tdd, 1, 2);
+    xarray<cd> swap_tensor = convert_TDD_to_tensor(swapped);
+    std::cout << swap_tensor << std::endl;
+}
+
 // to record memory usage, can run with valgrind --tool=massif./build/apps/program
 // and then print out with ms_print <massif_file>
 // Is this a good way to record memory usage? increases time complexity
@@ -366,15 +381,34 @@ void tdd_conversion_test() {
 
 int main()
 {
-    //tn_test();
-    //tdd_playground();
+    // tn_test();
+    // tdd_playground();
     // tdd_contract_test();
     // tdd_circuit_test();
     // toffoli_test();
     // fixed_point_grovers_test();
-    parsing_test();
+    // parsing_test();
     // tdd_conversion_test();
+    swap_axes_test();
 
 
     return 0;
 }
+
+// benchmarking
+// can easily time execution for this and use python time (for timing the python based simulators
+// such as qiskit mps, original TDD, QuEST )
+// QASM SUPPORTED ON DD, TDD, Qiskit
+// NOT SUPPORTED ON QuEST
+// DD supports qasm simulation 
+// (and can be done with either computing unitary of circuit or computing final statevector)
+// Is it worth writing a parser for QuEST to run qasm?
+// Alternatively is it preferable to just use Qiskit Statevector Sim?
+
+// Can verify correctness by comparing some sampled amplitudes with qiskit?
+
+// TODO is it possible to reshape a TDD
+
+
+// TODO TDD's may be useful for other uses of tensors in general (especially with support
+// for contraction, reshape, swap axes, addition and general dimensions)
