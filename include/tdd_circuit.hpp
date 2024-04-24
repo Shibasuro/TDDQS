@@ -496,6 +496,16 @@ class MPS_Circuit : public TDD_Circuit {
             return amalgam.get_probability_sum(qubit, val);
         }
 
+        xarray<cd> get_statevector() {
+            TDD amalgam = state[0];
+            for (uint16_t i = 1; i < num_qubits; i++) {
+                TDD next_to_contract = state[i];
+                amalgam = contract_tdds(amalgam, next_to_contract, {i}, {1}, 0, false);
+            }
+            // statevector is in amalgam, just convert to tensor
+            return convert_TDD_to_tensor(amalgam);
+        }
+
         // val can be either 0 or 1
         // MORE EFFICIENT METHOD HERE
         double get_qubit_probability(uint16_t qubit, uint32_t val) {

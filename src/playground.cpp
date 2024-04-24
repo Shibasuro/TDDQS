@@ -376,24 +376,148 @@ void swap_axes_test() {
 void correctness_test() {
     // test correctness of implementation against Quantum++ simulator
 
-    qpp::QCircuit qc = qpp::qasm::read_from_file("/home/shibasuro/tn_project/TNQS/src/qasm_bench/qft9.qasm");
+    // qpp::QCircuit qc = qpp::qasm::read_from_file("/home/shibasuro/tn_project/TNQS/src/qasm_bench/qft9.qasm");
 
-    // initialize the quantum engine with a circuit
-    qpp::QEngine q_engine{qc};
+    // // initialize the quantum engine with a circuit
+    // qpp::QEngine q_engine{qc};
 
-    // display the circuit resources
-    std::cout << "\n" << qc.get_resources() << "\n\n";
+    // // display the circuit resources
+    // std::cout << "\n" << qc.get_resources() << "\n\n";
 
-    // execute the quantum circuit
-    qpp::idx reps = 1; // repetitions
-    q_engine.execute(reps);
+    // // execute the quantum circuit
+    // qpp::idx reps = 1; // repetitions
+    // q_engine.execute(reps);
 
-    // display the measurement statistics
-    std::cout << q_engine << '\n';
+    // // display the measurement statistics
+    // std::cout << q_engine << '\n';
 
-    // display the final state on demand
-    std::cout << ">> Final state (transpose):\n";
-    std::cout << qpp::disp(qpp::transpose(q_engine.get_state())) << '\n';
+    // // display the final state on demand
+    // std::cout << ">> Final state (transpose):\n";
+    // std::cout << qpp::disp(qpp::transpose(q_engine.get_state())) << '\n';
+    
+    // ideally want to generate some simple random circuits, run on my simulator and on Q++,
+    // and see if they match (to some acceptable level of fidelity) -- inspired by narix10yc 70034-ISO
+    // project correctness checking
+
+    // set up randomness
+    std::default_random_engine generator;
+    generator.seed(time(NULL));
+    
+    // carry out a few rounds of checks
+    uint32_t num_rounds = 5;
+    uint32_t max_gates = 10; // restrict circuit depth for this purpose to ensure feasible calculations
+    uint32_t num_qubits = 3;
+    for (uint32_t i = 0; i < num_rounds; i++) {
+        // initialises circuit with num_qubits qubits
+        qpp::QCircuit qc{num_qubits, 0};
+        MPS_Circuit circ{num_qubits};
+        // now apply max_gates gates at random
+        for (uint32_t j = 0; j < max_gates; j++) {
+            std::uniform_int_distribution<uint32_t> qubit_distribution(0, num_qubits - 1);
+            uint32_t qubit1 = qubit_distribution(generator);
+            // for the purposes of the test, just use an adjacent qubit if its a two qubit gate
+            std::uniform_int_distribution<uint32_t> bool_distribution(0, 1);
+            uint32_t qubit2;
+            uint32_t dist = bool_distribution(generator);
+            if (qubit1 > 0) {
+                if (dist == 0) {
+                    qubit2 = qubit1 - 1;
+                }
+                else {
+                    qubit2 = qubit1 + 1;
+                    if (qubit2 >= num_qubits) {
+                        qubit2 = qubit1 - 1;
+                    }
+                }
+            }
+            else {
+                qubit2 = qubit1 + 1;
+            }
+            // currently support at most one parameter so test at most one param (which is an angle)
+            std::uniform_real_distribution<double> real_distribution(-1*M_1_PI, M_1_PI);
+            double param = real_distribution(generator);
+
+            uint32_t num_gate_types = 12;
+            std::uniform_int_distribution<uint32_t> gate_distribution(1, num_gate_types);
+            uint32_t current_gate_type = gate_distribution(generator);
+            switch(current_gate_type) {
+                case 1:
+                    circ.x(qubit1);
+                    qc.gate(qpp::gt.X, qubit1);
+                    break;
+                case 2:
+                    circ.y(qubit1);
+                    qc.gate(qpp::gt.Y, qubit1);
+                    break;
+                case 3:
+                    circ.z(qubit1);
+                    qc.gate(qpp::gt.Z, qubit1);
+                    break;
+                case 4:
+                    circ.h(qubit1);
+                    qc.gate(qpp::gt.H, qubit1);
+                    break;
+                case 5:
+                    circ.s(qubit1);
+                    qc.gate(qpp::gt.S, qubit1);
+                    break;
+                case 6:
+                    circ.t(qubit1);
+                    qc.gate(qpp::gt.T, qubit1);
+                    break;
+                case 7:
+                    circ.sx(qubit1);
+                    {
+                        qpp::cmat U(2,2);
+                        double h = 0.5;
+                        U << cd(h, h), cd(h,-h),
+                             cd(h,-h), cd(h,h);
+                        qc.gate(U, qubit1);
+                    }
+                    break;
+                case 8:
+                    circ.tdg(qubit1);
+                    {
+                        double r2 = pow(2, -0.5);
+                        qpp::cmat U(2,2);
+                        U << cd(1,0), cd(0,0), 
+                             cd(0,0), cd(r2,-r2);
+                        qc.gate(U, qubit1);
+                    }
+                    break;
+                case 9:
+                    circ.rz(qubit1, param);
+                    qc.gate(qpp::gt.RZ(param), qubit1);
+                    break;
+                case 10:
+                    circ.cx(qubit1, qubit2);
+                    qc.gate(qpp::gt.CNOT, qubit1, qubit2);
+                    break;
+                case 11:
+                    circ.cu1(qubit1, qubit2, param);
+                    {
+                        qpp::cmat U(2,2);
+                        U << cd(1,0), cd(0,0), 
+                             cd(0,0), cd(cos(param),sin(param));
+                        qc.CTRL(U, qubit1, qubit2);
+                    }
+                    break;
+                case 12:
+                    circ.swap(qubit1, qubit2);
+                    qc.gate(qpp::gt.SWAP, qubit1, qubit2);
+                    break;
+            }
+        }
+        // actually run the simulation
+        circ.simulate();
+        qpp::QEngine q_engine{qc};
+        q_engine.execute(1);
+        std::cout << "Quantum++" << std::endl;
+        std::cout << qpp::disp(qpp::transpose(q_engine.get_state())) << std::endl;
+        std::cout << "TDDQS" << std::endl;
+        std::cout << circ.get_statevector() << std::endl;
+    }
+
 }
 
 // to record memory usage, can run with valgrind --tool=massif./build/apps/program

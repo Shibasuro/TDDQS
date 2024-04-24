@@ -33,7 +33,7 @@ xarray<cd> pauli_z_gate() {
 
 // square root of x gate
 xarray<cd> sx_gate() {
-    double h = 1/2;
+    double h = 0.5;
     return {{cd(h,h),cd(h,-h)}, {cd(h,-h), cd(h,h)}};
 }
 
