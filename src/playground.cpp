@@ -11,6 +11,7 @@
 #include "tdd_circuit.hpp"
 #include "simulator.hpp"
 #include "parser.hpp"
+#include "qpp/qpp.h"
 
 #include <chrono>
 
@@ -320,20 +321,22 @@ void fixed_point_grovers_test() {
     std::cout << "Total probability: " << p_sum << std::endl;
 }
 
+// possible bug with edges not being cleaned up correctly?
 void parsing_test() {
-    MPS_Circuit circ = parse_circuit("/home/shibasuro/tn_project/TNQS/src/qasm_bench/qft22.qasm");
+    MPS_Circuit circ = parse_circuit("/home/shibasuro/tn_project/TNQS/src/qasm_bench/experiment.qasm");
     time_circuit(circ);
     xarray<size_t> indices = zeros<size_t>({circ.get_num_qubits()});
     indices(0) = 1;
     cd amp = circ.get_amplitude(indices);
+    std::cout << "amplitude: " << amp << std::endl;
     double prob = std::real(amp * std::conj(amp));
-    std::cout << "all 0 prob: " << prob << std::endl;
-    double total_prob = circ.get_qubit_probability(7, 0);
-    std::cout << "probability of qubit 8 being 0: " << total_prob << std::endl;
-    // std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
-    // std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;
-    // std::cout << "peak nodes: " << cache_map.peak_nodes() << std::endl;
-    // std::cout << "peak edges: " << cache_map.peak_edges() << std::endl;
+    std::cout << "prob: " << prob << std::endl;
+    double total_prob = circ.get_qubit_probability(1, 0);
+    std::cout << "probability of qubit 1 being 0: " << total_prob << std::endl;
+    std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
+    std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;
+    std::cout << "peak nodes: " << cache_map.peak_nodes() << std::endl;
+    std::cout << "peak edges: " << cache_map.peak_edges() << std::endl;
 }
 
 void tdd_conversion_test() {
@@ -370,6 +373,29 @@ void swap_axes_test() {
     std::cout << swap_tensor << std::endl;
 }
 
+void correctness_test() {
+    // test correctness of implementation against Quantum++ simulator
+
+    qpp::QCircuit qc = qpp::qasm::read_from_file("/home/shibasuro/tn_project/TNQS/src/qasm_bench/qft9.qasm");
+
+    // initialize the quantum engine with a circuit
+    qpp::QEngine q_engine{qc};
+
+    // display the circuit resources
+    std::cout << "\n" << qc.get_resources() << "\n\n";
+
+    // execute the quantum circuit
+    qpp::idx reps = 1; // repetitions
+    q_engine.execute(reps);
+
+    // display the measurement statistics
+    std::cout << q_engine << '\n';
+
+    // display the final state on demand
+    std::cout << ">> Final state (transpose):\n";
+    std::cout << qpp::disp(qpp::transpose(q_engine.get_state())) << '\n';
+}
+
 // to record memory usage, can run with valgrind --tool=massif./build/apps/program
 // and then print out with ms_print <massif_file>
 // Is this a good way to record memory usage? increases time complexity
@@ -389,7 +415,8 @@ int main()
     // fixed_point_grovers_test();
     // parsing_test();
     // tdd_conversion_test();
-    swap_axes_test();
+    // swap_axes_test();
+    correctness_test();
 
 
     return 0;
@@ -412,3 +439,13 @@ int main()
 
 // TODO TDD's may be useful for other uses of tensors in general (especially with support
 // for contraction, reshape, swap axes, addition and general dimensions)
+/// RESHAPE notes so far
+// first thing to note is that the initial reshapes are only necessary to add axis of dimension 1
+// this is easy, all that needs to be done is change the overall shape, and increase subsequent axis
+// indices
+// this amounts to an unsqueeze!
+
+// what are the reshape cases I need?
+// 1. inserting an axis of dimension 1
+// 2. changing from (2,old_chi1,2,old_chi2) to a matrix (2*old_chi1, 2*old_chi2)
+// 3. 

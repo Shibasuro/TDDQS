@@ -518,7 +518,6 @@ TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint16_t axis = 0) {
     // apply reductions
     // RR2 - redirect weight 0 edge to terminal 
     // if weight is 0, then node is just the terminal node with in_weight 0
-    // TODO? does this need approximate equality?
     if (weight == cd(0,0)) {
         // in this case, we also need to delete subnodes as we are replacing current node with terminal
         // removing edge reference should also eliminate references to the node
@@ -684,11 +683,6 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
     std::vector<size_t> f_shape = first.get_shape();
     std::vector<size_t> s_shape = second.get_shape();
 
-    // Can axis number be the first non-zero part of the shape instead?
-    // this may be less efficient than skipping axes but also correct?
-    // also should not affect efficiency very much actually, as depth is assumed to not be too high
-    // If not using this method, may require more complex implementation
-    // or different index order -- TODO investigate
     uint16_t first_axis = first.get_first_nonzero_index();
     uint16_t second_axis = second.get_first_nonzero_index();
     
@@ -963,8 +957,6 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
 }
 
 // convert TDD to a tensor
-// TODO something wrong here - think the problem is when there is more redundancy
-// CONFIRMED SOME VALUES ARE NOT GETTING CHANGED FROM 0
 xarray<cd> convert_TDD_to_tensor(TDD tdd) {
     xarray<cd> tensor = zeros<cd>(tdd.get_shape());
     const TDD_Node* root = tdd.get_root();
@@ -1037,6 +1029,11 @@ TDD kronecker_conjugate(TDD tdd) {
     TDD tdd2 = TDD(tdd.get_root(), std::conj(tdd.get_weight()), tdd.get_shape());
     return contract_tdds(tdd, tdd2, {}, {}, 0, false, true);
 }
+
+// BELOW IS NOT ACTUALLY USED ANYWHERE, however it would be necessary for doing SVD directly on 
+// TDD operation
+// Swapping axes is a fairly efficient operation, but reshape would be less efficient than
+// directly reshaping a tensor thus it seems it is not viable to do the direct SVD on a TDD
 
 // swap adjacent axes i.e. if swapping a, b sends iabj -> ibaj
 // we assume second_axis = first_axis + 1
@@ -1202,5 +1199,9 @@ TDD swap_adjacent_axes(TDD tdd, uint16_t first_axis, uint16_t second_axis, bool 
     const TDD_Node *new_node_ptr = cache_map.add_node(new_node);
     return TDD(new_node_ptr, weight, shape);
 }
+
+// TDD reshape(TDD tdd, std::vector<size_t> new_shape) {
+
+// }
 
 #endif

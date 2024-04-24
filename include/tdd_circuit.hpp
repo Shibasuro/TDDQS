@@ -221,6 +221,8 @@ class MPS_Circuit : public TDD_Circuit {
         std::vector<Instruction> instructions;
         std::default_random_engine generator;
 
+        uint32_t max_chi;
+
         double uniform_rand_in_range(double min, double max) {
             std::uniform_real_distribution<double> distribution(min, max);
             return distribution(generator);
@@ -350,7 +352,8 @@ class MPS_Circuit : public TDD_Circuit {
                     // 2. Convert TDD to tensor for SVD
 
                     xarray<cd> theta_tensor = convert_TDD_to_tensor(theta);
-                    // now that it is a tensor, we can apply the necessary reshape to get ibjc or equivalent
+                    // now that it is a tensor, we can apply the necessary reshape/axis swaps to get ibjc
+                    // the reshapes handle the case where old_chi1 or old_chi2 is 1 before doing the axis swap
                     if (q1_to_q2_bond_index == q2_to_q1_bond_index) {
                         // then ijbd, reshape to ibjd
                         theta_tensor.reshape({2, 2, old_chi1, old_chi2});
@@ -384,6 +387,10 @@ class MPS_Circuit : public TDD_Circuit {
                     filtration(v, real(v * conj(v)) < double_error) = 0;
 
                     uint32_t new_chi = temp_s.size();
+                    // if this would push us over the limit, then we restrict to max_chi at cost of fidelity
+                    if (new_chi > max_chi) {
+                        new_chi = max_chi;
+                    }
                     xarray<cd> u_prime = view(u, all(), range(0, new_chi));
                     xarray<cd> s_prime = view(s, range(0, new_chi));
                     xarray<cd> v_prime = view(v, range(0, new_chi), all());
@@ -394,18 +401,22 @@ class MPS_Circuit : public TDD_Circuit {
                     // 5. Calculate new tensors for q1 and q2
                     xarray<cd> q1_prime = linalg::dot(u_prime, diag(s_prime));
                     xarray<cd> q2_prime = v_prime;
+                    
+                    // these matrices come out as (2*old_chi1, new_chi)
+                    // and (new_chi, 2*old_chi)
+                    // could this be done by splitting 2*old_chi1 into 2, old_chi1?
+                    // and then applying a variation of swap axes
+                    // some kind of a soft swap?
 
                     // apply reshape to ensure we have (2, new_chi, other) etc.
 
-                    if (shape1.size() == 2) {
-                        q1_prime.reshape({2, new_chi});
-                    }
-                    else {
+                    // say we split (2*old_chi1, new_chi) -> (2, old_chi, new_chi)
+                    if (shape1.size() > 2) {
                         if (q1_to_q2_bond_index == 1) {
-                            q1_prime.reshape({2, new_chi, shape1[2]});
+                            q1_prime.reshape({2, new_chi, old_chi1});
                         }
                         else {
-                            q1_prime.reshape({2, shape1[1], new_chi});
+                            q1_prime.reshape({2, old_chi1, new_chi});
                         }
                     }
 
@@ -414,10 +425,10 @@ class MPS_Circuit : public TDD_Circuit {
                     }
                     else {
                         if (q2_to_q1_bond_index == 1) {
-                            q2_prime.reshape({2, new_chi, shape2[2]});
+                            q2_prime.reshape({2, new_chi, old_chi2});
                         }
                         else {
-                            q2_prime.reshape({2, shape2[1], new_chi});
+                            q2_prime.reshape({2, old_chi2, new_chi});
                         }
                     }
 
@@ -443,6 +454,14 @@ class MPS_Circuit : public TDD_Circuit {
             TDD_Circuit();
             num_qubits = qubits;
             initialise_state(bitstring, false);
+        }
+
+        // this constructor provides an option to restrict the maximum bond dimension at the cost of fidelity
+        MPS_Circuit(uint32_t qubits, std::string bitstring, uint32_t max_bd) {
+            TDD_Circuit();
+            num_qubits = qubits;
+            initialise_state(bitstring, false);
+            max_chi = max_bd;
         }
 
         uint32_t get_num_qubits() {

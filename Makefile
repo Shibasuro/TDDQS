@@ -5,7 +5,7 @@ BUILD    := ./build
 OBJ_DIR  := $(BUILD)/objects
 APP_DIR  := $(BUILD)/apps
 TARGET   := program
-INCLUDE  := -Iinclude/ -I/home/shibasuro/miniforge3/include/ -I/home/shibasuro/qasmtools/include/
+INCLUDE  := -Iinclude/ -I/home/shibasuro/miniforge3/include/ -I/home/shibasuro/qasmtools/include/ -I/usr/local/include/qpp -I/usr/local/include/eigen3/
 SRC      :=                      \
    $(wildcard src/*.cpp)         \
 
