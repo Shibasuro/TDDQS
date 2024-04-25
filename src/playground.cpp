@@ -404,9 +404,11 @@ void correctness_test() {
     generator.seed(time(NULL));
     
     // carry out a few rounds of checks
-    uint32_t num_rounds = 5;
+    // TODO fix sign errors? - is this caused by -0?
+    uint32_t num_rounds = 100;
     uint32_t max_gates = 10; // restrict circuit depth for this purpose to ensure feasible calculations
-    uint32_t num_qubits = 3;
+    uint32_t num_qubits = 10;
+    uint32_t num_failures = 0;
     for (uint32_t i = 0; i < num_rounds; i++) {
         // initialises circuit with num_qubits qubits
         qpp::QCircuit qc{num_qubits, 0};
@@ -512,10 +514,36 @@ void correctness_test() {
         circ.simulate();
         qpp::QEngine q_engine{qc};
         q_engine.execute(1);
-        std::cout << "Quantum++" << std::endl;
-        std::cout << qpp::disp(qpp::transpose(q_engine.get_state())) << std::endl;
-        std::cout << "TDDQS" << std::endl;
-        std::cout << circ.get_statevector() << std::endl;
+        // std::cout << "Quantum++" << std::endl;
+        // std::cout << qpp::disp(qpp::transpose(q_engine.get_state())) << std::endl;
+        // std::cout << "TDDQS" << std::endl;
+        // std::cout << circ.get_statevector() << std::endl;
+        // retrieve statevector equivalent representation and compare
+        auto qpp_state = qpp::transpose(q_engine.get_state());
+        xarray<cd> tdd_state = circ.get_statevector();
+        // these should be num_qubit statevectors, so just compare index by index?
+        uint32_t max_index = (uint32_t)pow(2, num_qubits);
+        // convert tdd_state to vector
+        tdd_state.reshape({max_index});
+        uint32_t incorrect_val_count = 0;
+        for (uint32_t j = 0; j < max_index; j++) {
+            cd expected = qpp_state(j);
+            cd actual = tdd_state(j);
+            if (! (is_approx_equal(expected, actual))) {
+                incorrect_val_count++;
+            }
+        }
+        if (incorrect_val_count > 0) {
+            std::cout << "Failure on round " << i << " with " << incorrect_val_count << " errors" << std::endl; 
+            std::cout << "Quantum++" << std::endl;
+            std::cout << qpp::disp(qpp_state) << std::endl;
+            std::cout << "TDDQS" << std::endl;
+            std::cout << tdd_state << std::endl;
+            num_failures += 1;
+        }
+    }
+    if (num_failures == 0) {
+        std::cout << "Success" << std::endl;
     }
 
 }
@@ -541,7 +569,6 @@ int main()
     // tdd_conversion_test();
     // swap_axes_test();
     correctness_test();
-
 
     return 0;
 }

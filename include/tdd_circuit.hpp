@@ -381,7 +381,7 @@ class MPS_Circuit : public TDD_Circuit {
 
                     // 4. SVD Culling and Renormalisation (outputs new u, s, v)
                     // remove values that come from floating point errors;
-                    double double_error = 0.00001;
+                    double double_error = 0.000001;
                     filtration(u, real(u * conj(u)) < double_error) = 0;
                     xarray<cd> temp_s = filter(s, real(s) > double_error);
                     filtration(v, real(v * conj(v)) < double_error) = 0;
@@ -404,31 +404,19 @@ class MPS_Circuit : public TDD_Circuit {
                     
                     // these matrices come out as (2*old_chi1, new_chi)
                     // and (new_chi, 2*old_chi)
-                    // could this be done by splitting 2*old_chi1 into 2, old_chi1?
-                    // and then applying a variation of swap axes
-                    // some kind of a soft swap?
 
-                    // apply reshape to ensure we have (2, new_chi, other) etc.
-
-                    // say we split (2*old_chi1, new_chi) -> (2, old_chi, new_chi)
                     if (shape1.size() > 2) {
+                        q1_prime.reshape({2, old_chi1, new_chi});
                         if (q1_to_q2_bond_index == 1) {
-                            q1_prime.reshape({2, new_chi, old_chi1});
-                        }
-                        else {
-                            q1_prime.reshape({2, old_chi1, new_chi});
+                            q1_prime = swapaxes(q1_prime, 1, 2);
                         }
                     }
 
-                    if (shape2.size() == 2) {
-                        q2_prime.reshape({2, new_chi});
-                    }
-                    else {
+                    q2_prime = swapaxes(q2_prime, 0, 1);
+                    if (shape2.size() > 2) {
+                        q2_prime.reshape({2, old_chi2, new_chi});
                         if (q2_to_q1_bond_index == 1) {
-                            q2_prime.reshape({2, new_chi, old_chi2});
-                        }
-                        else {
-                            q2_prime.reshape({2, old_chi2, new_chi});
+                            q2_prime = swapaxes(q2_prime, 1, 2);
                         }
                     }
 
