@@ -373,6 +373,7 @@ class TDD {
     private: 
         const TDD_Node *root;
         cd in_weight;
+        uint16_t axis_offset = 0;
         // shape is needed for contraction (keeps track of shape TDD should represent)
         // TODO if it turns out there are very high rank tensors (many many dimensions)
         // then may be worth converting from a vector to a deque or list
@@ -383,6 +384,16 @@ class TDD {
             root = r;
             in_weight = weight;
             shape = s;
+        }
+        TDD(const TDD_Node *r, cd weight, std::vector<size_t> s, uint16_t offset) {
+            root = r;
+            in_weight = weight;
+            shape = s;
+            axis_offset = offset;
+        }
+
+        uint16_t get_axis_offset() const {
+            return axis_offset;
         }
 
         const TDD_Node *get_root() const {
@@ -395,6 +406,10 @@ class TDD {
 
         std::vector<size_t> get_shape() const {
             return shape;
+        }
+        
+        void multiply_weight(cd multiplier) {
+            in_weight *= multiplier;
         }
 
         // returns first nonzero index, or if none is found then out of bounds index
@@ -444,14 +459,16 @@ class TDD {
             if (root->is_terminal() || root->get_axis_index() > 0) {
                 // if root is terminal or already past the physical index, just return
                 // progressing forward by one index in the shape
-                return TDD(root, in_weight, new_shape);
+                // with an axis offset to account for shape shift
+                return TDD(root, in_weight, new_shape, 1);
             }
-            // otherwise root axis index is 0, and thus we need to shift to the successor
+            // otherwise root is not terminal and axis index is 0, thus we need to shift to the successor
             const TDD_Edge* successor = root->get_successor_ref(index);
             const TDD_Node* new_node = successor->get_target();
             cd edge_weight = successor->get_weight();
             cd new_in_weight = in_weight * edge_weight;
-            return TDD(new_node, new_in_weight, new_shape);
+            // include an axis offset to account for shape shift
+            return TDD(new_node, new_in_weight, new_shape, 1);
         }
 
 };
@@ -582,7 +599,7 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
             tdds[i].cleanup();
         }
         // shape should also be unchanged
-        return TDD(roots[0], weight_sum, tdds[0].get_shape());
+        return TDD(roots[0], weight_sum, tdds[0].get_shape(), tdds[0].get_axis_offset());
     }
 
     // otherwise start generating new node, with the minimum axis index
@@ -654,7 +671,7 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
     // RR2 - see convert to tdd for more info
     if (weight == cd(0,0)) {
         new_node.clear_successors();
-        return TDD(cache_map.get_terminal_node(), 0, shape);
+        return TDD(cache_map.get_terminal_node(), 0, shape, tdds[0].get_axis_offset());
     }
 
     // RR3 - see convert to tdd for more info
@@ -664,11 +681,11 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
         new_node.clear_successors();
         const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
 
-        return TDD(new_node_ptr, weight, shape);
+        return TDD(new_node_ptr, weight, shape, tdds[0].get_axis_offset());
     }
 
     const TDD_Node *new_node_ptr = cache_map.add_node(new_node);
-    return TDD(new_node_ptr, weight, shape);
+    return TDD(new_node_ptr, weight, shape, tdds[0].get_axis_offset());
 }
 
 // axes are assumed to both be in ascending order, and same length
@@ -682,6 +699,9 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
 
     std::vector<size_t> f_shape = first.get_shape();
     std::vector<size_t> s_shape = second.get_shape();
+
+    uint16_t first_axis_offset = first.get_axis_offset();
+    uint16_t second_axis_offset = second.get_axis_offset();
 
     uint16_t first_axis = first.get_first_nonzero_index();
     uint16_t second_axis = second.get_first_nonzero_index();
@@ -816,13 +836,13 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
             case 0:
                 // Index Both and Contract
                 // should only occur if both axes are equal
-                if (first_axis >= f_root->get_axis_index() && !f_root->is_terminal()) {
+                if (first_axis >= (f_root->get_axis_index() - first_axis_offset) && !f_root->is_terminal()) {
                     first_succ_node = f_root->get_successor_ref(i)->get_target();
                     first_succ_weight *= f_root->get_successor_ref(i)->get_weight();
                     // we progress by one index, but leave axis the same to account for 
                     // lost contraction axis
                 }
-                if (second_axis >= s_root->get_axis_index() && !s_root->is_terminal()) {
+                if (second_axis >= (s_root->get_axis_index() - second_axis_offset) && !s_root->is_terminal()) {
                     second_succ_node = s_root->get_successor_ref(i)->get_target();
                     second_succ_weight *= s_root->get_successor_ref(i)->get_weight();
                     // we progress by one index, but leave axis the same to account for 
@@ -840,7 +860,7 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
                 break;
             case 1:
                 // Index First
-                if (first_axis >= f_root->get_axis_index() && !f_root->is_terminal()) {
+                if (first_axis >= (f_root->get_axis_index() - first_axis_offset) && !f_root->is_terminal()) {
                     first_succ_node = f_root->get_successor_ref(i)->get_target();
                     first_succ_weight *= f_root->get_successor_ref(i)->get_weight();
                 }
@@ -851,7 +871,7 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
                 break;
             case 2:
                 // Index Second
-                if (second_axis >= s_root->get_axis_index() && !s_root->is_terminal()) {
+                if (second_axis >= (s_root->get_axis_index() - second_axis_offset) && !s_root->is_terminal()) {
                     second_succ_node = s_root->get_successor_ref(i)->get_target();
                     if (kc) {
                         second_succ_weight *= std::conj(s_root->get_successor_ref(i)->get_weight());
@@ -867,8 +887,8 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
                 break;
         }
 
-        TDD first_successor = TDD(first_succ_node, first_succ_weight, first_succ_shape);
-        TDD second_successor = TDD(second_succ_node, second_succ_weight, second_succ_shape);
+        TDD first_successor = TDD(first_succ_node, first_succ_weight, first_succ_shape, first_axis_offset);
+        TDD second_successor = TDD(second_succ_node, second_succ_weight, second_succ_shape, second_axis_offset);
 
         TDD child = contract_tdds(first_successor, second_successor, new_first_axes, new_second_axes, new_axis, false, kc);
 
@@ -958,6 +978,7 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
 
 // convert TDD to a tensor
 xarray<cd> convert_TDD_to_tensor(TDD tdd) {
+    uint16_t axis_offset = tdd.get_axis_offset();
     xarray<cd> tensor = zeros<cd>(tdd.get_shape());
     const TDD_Node* root = tdd.get_root();
     if (root->is_terminal()) {
@@ -975,7 +996,7 @@ xarray<cd> convert_TDD_to_tensor(TDD tdd) {
     cumulative_weights.push(tdd.get_weight());
     xstrided_slice_vector initial_index_set;
     // account for initial skipped layers
-    for (uint32_t i = 0; i < root->get_axis_index(); i++) {
+    for (uint16_t i = 0; i < (root->get_axis_index() - axis_offset); i++) {
         initial_index_set.push_back(all());
     }
     index_sets.push(initial_index_set);
@@ -1026,7 +1047,7 @@ xarray<cd> convert_TDD_to_tensor(TDD tdd) {
 
 // uses contract_tdds to compute kronecker product of tdd and tdd_conjugate
 TDD kronecker_conjugate(TDD tdd) {
-    TDD tdd2 = TDD(tdd.get_root(), std::conj(tdd.get_weight()), tdd.get_shape());
+    TDD tdd2 = TDD(tdd.get_root(), std::conj(tdd.get_weight()), tdd.get_shape(), tdd.get_axis_offset());
     return contract_tdds(tdd, tdd2, {}, {}, 0, false, true);
 }
 

@@ -331,8 +331,13 @@ void parsing_test() {
     std::cout << "amplitude: " << amp << std::endl;
     double prob = std::real(amp * std::conj(amp));
     std::cout << "prob: " << prob << std::endl;
-    double total_prob = circ.get_qubit_probability(1, 0);
-    std::cout << "probability of qubit 1 being 0: " << total_prob << std::endl;
+    double total_prob = circ.get_qubit_probability(0, 0);
+    std::cout << "probability of qubit 0 being 0: " << total_prob << std::endl;
+    total_prob = circ.get_qubit_probability(0, 1);
+    std::cout << "probability of qubit 0 being 1: " << total_prob << std::endl;
+
+    std::cout << circ.get_statevector() << std::endl;
+
     std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
     std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;
     std::cout << "peak nodes: " << cache_map.peak_nodes() << std::endl;
@@ -373,27 +378,30 @@ void swap_axes_test() {
     std::cout << swap_tensor << std::endl;
 }
 
+void manual_correctness_test() {
+    qpp::QCircuit qc = qpp::qasm::read_from_file("/home/shibasuro/tn_project/TNQS/src/qasm_bench/experiment.qasm");
+
+    // initialize the quantum engine with a circuit
+    qpp::QEngine q_engine{qc};
+
+    // display the circuit resources
+    std::cout << "\n" << qc.get_resources() << "\n\n";
+
+    // execute the quantum circuit
+    qpp::idx reps = 1; // repetitions
+    q_engine.execute(reps);
+
+    // display the final state on demand
+    std::cout << "Quantum++: \n";
+    std::cout << qpp::disp(q_engine.get_state()) << '\n';
+
+    MPS_Circuit circ = parse_circuit("/home/shibasuro/tn_project/TNQS/src/qasm_bench/experiment.qasm");
+    time_circuit(circ);
+    std::cout << "TDDQS: \n" << circ.get_statevector() << std::endl;
+}
+
 void correctness_test() {
     // test correctness of implementation against Quantum++ simulator
-
-    // qpp::QCircuit qc = qpp::qasm::read_from_file("/home/shibasuro/tn_project/TNQS/src/qasm_bench/qft9.qasm");
-
-    // // initialize the quantum engine with a circuit
-    // qpp::QEngine q_engine{qc};
-
-    // // display the circuit resources
-    // std::cout << "\n" << qc.get_resources() << "\n\n";
-
-    // // execute the quantum circuit
-    // qpp::idx reps = 1; // repetitions
-    // q_engine.execute(reps);
-
-    // // display the measurement statistics
-    // std::cout << q_engine << '\n';
-
-    // // display the final state on demand
-    // std::cout << ">> Final state (transpose):\n";
-    // std::cout << qpp::disp(qpp::transpose(q_engine.get_state())) << '\n';
     
     // ideally want to generate some simple random circuits, run on my simulator and on Q++,
     // and see if they match (to some acceptable level of fidelity) -- inspired by narix10yc 70034-ISO
@@ -565,10 +573,11 @@ int main()
     // tdd_circuit_test();
     // toffoli_test();
     // fixed_point_grovers_test();
-    // parsing_test();
+    parsing_test();
     // tdd_conversion_test();
     // swap_axes_test();
-    correctness_test();
+    // manual_correctness_test();
+    // correctness_test();
 
     return 0;
 }

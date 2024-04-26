@@ -221,7 +221,7 @@ class MPS_Circuit : public TDD_Circuit {
         std::vector<Instruction> instructions;
         std::default_random_engine generator;
 
-        uint32_t max_chi;
+        uint32_t max_chi = std::numeric_limits<uint32_t>::max();
 
         double uniform_rand_in_range(double min, double max) {
             std::uniform_real_distribution<double> distribution(min, max);
@@ -267,9 +267,20 @@ class MPS_Circuit : public TDD_Circuit {
                     xarray<cd> gate = instr.get_gate().get_gate();
                     gate.reshape({2, 2, 2, 2});
 
-                    TDD gate_TDD = convert_tensor_to_TDD(gate);
                     uint32_t q1 = instr.get_q1();
                     uint32_t q2 = instr.get_q2();
+                    // make sure we always use the lower qubit number q1, and adjust the gate
+                    // accordingly to make sure gate is still applied correctly?
+                    if (q2 < q1) {
+                        uint32_t temp = q2;
+                        q2 = q1;
+                        q1 = temp;
+                        // if this is the case, just swap m,n and i,j in ijmn?
+                        // that way it is effectively the same gate when we flip q1 and q2
+                        gate = swapaxes(gate, {2}, {3});
+                        gate = swapaxes(gate, {0}, {1});
+                    }
+                    TDD gate_TDD = convert_tensor_to_TDD(gate);
 
                     // now need to contract the two relevant MPS states state[q1] and state[q2]
                     // also contracting them with the gate itself
@@ -403,7 +414,7 @@ class MPS_Circuit : public TDD_Circuit {
                     xarray<cd> q2_prime = v_prime;
                     
                     // these matrices come out as (2*old_chi1, new_chi)
-                    // and (new_chi, 2*old_chi)
+                    // and (new_chi, 2*old_chi2)
 
                     if (shape1.size() > 2) {
                         q1_prime.reshape({2, old_chi1, new_chi});
@@ -467,6 +478,7 @@ class MPS_Circuit : public TDD_Circuit {
             return amalgam.get_weight();
         }
 
+        // this is incorrect but also inefficient - TODO delete when no longer useful
         double get_inefficient_qubit_probability(uint16_t qubit, uint32_t val) {
             // old, inefficient method
             // this is not efficient as we lose the compression of MPS
@@ -496,45 +508,53 @@ class MPS_Circuit : public TDD_Circuit {
 
         // val can be either 0 or 1
         // MORE EFFICIENT METHOD HERE
+        // TODO make sure that this does not permanently create extra nodes
+        // nor does it delete anything in the state
+        // TODO bugged currently - no longer crashes but produces incorrect probabilities?
+        // or maybe correct but not normalised?
+        // probabilities of all qubits sum to the same amount (not 1 though)
+        // is normalisation issue due to left/right? -> is this because of my SVD not keeping MPS in right gauge
         double get_qubit_probability(uint16_t qubit, uint32_t val) {
             // calculate initial term, contracting from the right
-            // TODO make sure that this does not permanently create extra nodes
-            // nor does it delete anything in the state
             TDD q_current;
             if (qubit == num_qubits - 1) {
                 q_current = kronecker_conjugate(state[num_qubits - 1].get_child_TDD(val));
             }
             else {
                 std::vector<TDD> tdds;
-                tdds.push_back(kronecker_conjugate(state[num_qubits - 1].get_child_TDD(0)));
-                tdds.push_back(kronecker_conjugate(state[num_qubits - 1].get_child_TDD(1)));
-                q_current = add_tdds(tdds, false);
+                TDD child0 = state[num_qubits - 1].get_child_TDD(0);
+                TDD child1 = state[num_qubits - 1].get_child_TDD(1);
+                tdds.push_back(kronecker_conjugate(child0));
+                tdds.push_back(kronecker_conjugate(child1));
+                q_current = add_tdds(tdds);
             }
-            for (int16_t i = num_qubits - 2; i >= 0; i--) {
+            for (uint32_t j = 0; j < num_qubits - 1; j++) {
+                uint32_t i = num_qubits - 2 - j;
                 TDD q_temp;
                 if (i == qubit) {
                     // then we can index by val
                     q_temp = kronecker_conjugate(state[i].get_child_TDD(val));
                 }
                 else {
-                    // TODO maybe investigate whether doing addition then contraction 
-                    // or contraction then addition is faster
                     std::vector<TDD> tdds;
-                    tdds.push_back(kronecker_conjugate(state[i].get_child_TDD(0)));
-                    tdds.push_back(kronecker_conjugate(state[i].get_child_TDD(1)));
+                    TDD child0 = state[i].get_child_TDD(0);
+                    TDD child1 = state[i].get_child_TDD(1);
+                    tdds.push_back(kronecker_conjugate(child0));
+                    tdds.push_back(kronecker_conjugate(child1));
                     q_temp = add_tdds(tdds);
                 }
                 if (i > 0) {
-                    q_current = contract_tdds(q_temp, q_current, {1}, {0});
+                    q_current = contract_tdds(q_temp, q_current, {1, 3}, {0, 1});
                 }
                 else {
-                    q_current = contract_tdds(q_temp, q_current, {0}, {0});
+                    q_current = contract_tdds(q_temp, q_current, {0, 1}, {0, 1});
                 }
             }
             // now q_current should contain the final weight
             return std::real(q_current.get_weight());
         }
 
+        // TODO deprecate as this is inefficient
         std::vector<double> get_qubit_probabilities(std::vector<uint16_t> qubits, std::vector<uint32_t> vals) {
             TDD amalgam = state[0];
             for (uint16_t i = 1; i < num_qubits; i++) {

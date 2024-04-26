@@ -10,8 +10,8 @@ MPS_Circuit parse_circuit(std::string fname) {
     ast::ptr<ast::Program> parsed_circuit = parser::parse_file(fname);
     // initialise state
     uint32_t num_qubits = parsed_circuit->qubits();
-    MPS_Circuit circ(num_qubits, "101010101");
-    // MPS_Circuit circ(num_qubits);
+    // MPS_Circuit circ(num_qubits, "101010101");
+    MPS_Circuit circ(num_qubits);
     for (std::list<ast::ptr<ast::Stmt>>::iterator it = parsed_circuit->begin(); it != parsed_circuit->end(); it++) {
         if (dynamic_cast<ast::Gate*>(&(**it)) != nullptr) {
             if (dynamic_cast<ast::DeclaredGate*>(&(**it)) != nullptr) {
