@@ -120,6 +120,8 @@ class TDD_Node {
         void delete_edges() const;
 
         void cleanup() const;
+
+        void cleanup_duplicates() const;
         
         cd get_value(xarray<size_t> indices) const {
             if (is_terminal()) {
@@ -332,6 +334,22 @@ class TDD_Map {
             return max_edges;
         }
         
+        void print_maps() {
+            std::cout << "node_map" << std::endl;
+            for (const auto &[k, v] : node_map) {
+                if (k.is_terminal()) {
+                    std::cout << "terminal" << std::endl;
+                }
+                std::cout << "refs: " << v << std::endl;
+            }
+            std::cout << "edge_map" << std::endl;
+            for (const auto &[k, v] : edge_map) {
+                if (k.get_target()->is_terminal()) {
+                    std::cout << "terminal" << std::endl;
+                }
+                std::cout << "refs: " << v << std::endl;
+            }
+        }
         // would be nice to be able to estimate memory cost here, idk how though
         // since nodes can have different numbers of successors, just measuring number of nodes/edges isnt a fair assessment
         
@@ -363,6 +381,19 @@ inline void TDD_Node::cleanup() const {
         return;
     }
     for (size_t i = 0; i < successors.size(); i++) {
+        const TDD_Node *next = get_successor_ref(i)->get_target();
+        next->cleanup();
+        cache_map.remove_edge_ref(successors[i]);
+    }
+}
+
+inline void TDD_Node::cleanup_duplicates() const {
+    if (is_terminal()) {
+        return;
+    }
+    // delete all the successors except the first one which we preserve
+    cache_map.remove_edge_ref(successors[0]);
+    for (size_t i = 1; i < successors.size(); i++) {
         const TDD_Node *next = get_successor_ref(i)->get_target();
         next->cleanup();
         cache_map.remove_edge_ref(successors[i]);
@@ -483,6 +514,9 @@ std::vector<size_t> get_shape_as_vector(xarray<cd> &tensor) {
     return shape;
 }
 
+// TODO does clear_successors need to be reimplemented or replaced with cleanup
+// as it currently only removes the direct children (does not clean up anything further down)
+
 
 // recursive implementation to convert arbitrary tensor into a TDD
 TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint16_t axis = 0) {
@@ -539,7 +573,7 @@ TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint16_t axis = 0) {
     if (weight == cd(0,0)) {
         // in this case, we also need to delete subnodes as we are replacing current node with terminal
         // removing edge reference should also eliminate references to the node
-        new_node.clear_successors();
+        new_node.cleanup();
         return TDD(cache_map.get_terminal_node(), 0, new_shape);
     }
 
@@ -550,7 +584,7 @@ TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint16_t axis = 0) {
         // that means the other successors need to be deleted as well (they are identical to the first anyway)
         const TDD_Node next_node = *(new_node.get_successor_ref(0)->get_target());
         // delete the successors
-        new_node.clear_successors();
+        new_node.cleanup_duplicates();
 
         const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
 
@@ -654,15 +688,19 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
         new_edge_set.insert(new_node.add_successor(next_node, next_weight));
     }
 
-    // we can now clean up the summands used at this step (any of those with axis_index == min_axis_index)
+    //we can now clean up the summands used at this step (any of those with axis_index == min_axis_index)
     for (size_t i = 0; i < roots.size(); i++) {
         const TDD_Node *root = roots[i];
         // only clean up if we actually used the index at this stage
         if (root->get_axis_index() == min_axis_index) {
-            root->clear_successors();
+            // only delete the edges at this stage in case the next case is base case
+            root->delete_edges();
+            cache_map.remove_node_ref(root);
+            // this means that some nodes don't get deleted though (i.e. if next case
+            // is not base case)
         }
         // clean up top level tdds if its the top level call
-        if (first) {
+        else if (first) {
             cache_map.remove_node_ref(root);
         }
     }
@@ -671,7 +709,7 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
     weight *= normalisation_weight;
     // RR2 - see convert to tdd for more info
     if (weight == cd(0,0)) {
-        new_node.clear_successors();
+        new_node.cleanup();
         return TDD(cache_map.get_terminal_node(), 0, shape, tdds[0].get_axis_offset());
     }
 
@@ -679,7 +717,7 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
     if (new_edge_set.size() == 1) {
         const TDD_Node next_node = *(new_node.get_successor_ref(0)->get_target());
         // delete the successors
-        new_node.clear_successors();
+        new_node.cleanup_duplicates();
         const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
 
         return TDD(new_node_ptr, weight, shape, tdds[0].get_axis_offset());
@@ -759,7 +797,7 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
             }
         }
 
-        return TDD(first.get_root(), new_weight, new_shape);
+        return TDD(cache_map.get_terminal_node(), new_weight, new_shape);
     }
 
     const TDD_Node *f_root = first.get_root();
@@ -924,6 +962,16 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
         }
     }
 
+    // although the below is effective, it also does not clean up as dynamically as we would like
+    // TODO this may result in higher maximum node counts during contraction
+    // so it is important to look into making cleanup finer grained (i.e. clean up during execution)
+    if (clear) {
+        // then we are in initial call, clear the input TDDs
+        first.cleanup();
+        second.cleanup();
+    }
+
+
     if (indexing_scheme == 0) {
         // if we are contracting an index at this step, then return the sum of all the contracted TDDs
         // should already be reduced thanks to add_tdds automatically reducing
@@ -946,20 +994,11 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
     //     //s_root->clear_successors();
     // }
 
-    // although the below is effective, it also does not clean up as dynamically as we would like
-    // TODO this may result in higher maximum node counts during contraction
-    // so it is important to look into making cleanup finer grained (i.e. clean up during execution)
-    if (clear) {
-        // then we are in initial call, clear the input TDDs
-        first.cleanup();
-        second.cleanup();
-    }
-
     // reduce the TDD
     weight *= normalisation_weight;
     // RR2 - see convert to tdd for more info
     if (weight == cd(0,0)) {
-        new_node.clear_successors();
+        new_node.cleanup();
         return TDD(cache_map.get_terminal_node(), 0, shape);
     }
 
@@ -967,7 +1006,7 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
     if (new_edge_set.size() == 1) {
         const TDD_Node next_node = *(new_node.get_successor_ref(0)->get_target());
         // delete the successors
-        new_node.clear_successors();
+        new_node.cleanup_duplicates();
         const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
 
         return TDD(new_node_ptr, weight, shape);

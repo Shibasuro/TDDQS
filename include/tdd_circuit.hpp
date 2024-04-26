@@ -440,6 +440,14 @@ class MPS_Circuit : public TDD_Circuit {
             }
         }
 
+        // This is just to delete all the TDDs and see if any nodes/edges are leftover - which
+        // would suggest somewhere cleanup is failing
+        void cleanup() {
+            for (uint32_t i = 0; i < num_qubits; i++) {
+                state[i].cleanup();
+            }
+        }
+
         uint32_t get_num_qubits() {
             return num_qubits;
         }
@@ -473,6 +481,8 @@ class MPS_Circuit : public TDD_Circuit {
             return amalgam.get_probability_sum(qubit, val);
         }
 
+        // NOTE THAT THIS DOES NOT CLEANUP NODES AND EDGES - this is fine though as 
+        // if we convert to statevector we lose all compression anyway
         xarray<cd> get_statevector() {
             TDD amalgam = state[0];
             for (uint16_t i = 1; i < num_qubits; i++) {
@@ -526,7 +536,8 @@ class MPS_Circuit : public TDD_Circuit {
                 }
             }
             // now q_current should contain the final weight
-            return std::real(q_current.get_weight());
+            double probability = std::real(q_current.get_weight());
+            return probability;
         }
 
         // TODO deprecate as this is inefficient

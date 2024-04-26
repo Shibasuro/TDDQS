@@ -338,12 +338,15 @@ void parsing_test() {
 
     // std::cout << circ.get_statevector() << std::endl;
     // circ.print_mps_state();
+    // CLEANUP INDICATES BUG WITH CLEANING UP NODES/EDGES SOMEWHERE
+    circ.cleanup();
 
 
     std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
     std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;
     std::cout << "peak nodes: " << cache_map.peak_nodes() << std::endl;
     std::cout << "peak edges: " << cache_map.peak_edges() << std::endl;
+    // cache_map.print_maps();
 }
 
 void tdd_conversion_test() {
@@ -578,7 +581,7 @@ int main()
     // tdd_conversion_test();
     // swap_axes_test();
     // manual_correctness_test();
-    // correctness_test();
+    correctness_test();
 
     return 0;
 }
