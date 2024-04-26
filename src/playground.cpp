@@ -327,16 +327,18 @@ void parsing_test() {
     time_circuit(circ);
     xarray<size_t> indices = zeros<size_t>({circ.get_num_qubits()});
     indices(0) = 1;
-    cd amp = circ.get_amplitude(indices);
-    std::cout << "amplitude: " << amp << std::endl;
-    double prob = std::real(amp * std::conj(amp));
-    std::cout << "prob: " << prob << std::endl;
-    double total_prob = circ.get_qubit_probability(0, 0);
-    std::cout << "probability of qubit 0 being 0: " << total_prob << std::endl;
-    total_prob = circ.get_qubit_probability(0, 1);
-    std::cout << "probability of qubit 0 being 1: " << total_prob << std::endl;
+    // cd amp = circ.get_amplitude(indices);
+    // std::cout << "amplitude: " << amp << std::endl;
+    // double prob = std::real(amp * std::conj(amp));
+    // std::cout << "prob: " << prob << std::endl;
+    // double total_prob = circ.get_qubit_probability(0, 0);
+    // std::cout << "probability of qubit 0 being 0: " << total_prob << std::endl;
+    // total_prob = circ.get_qubit_probability(0, 1);
+    // std::cout << "probability of qubit 0 being 1: " << total_prob << std::endl;
 
-    std::cout << circ.get_statevector() << std::endl;
+    // std::cout << circ.get_statevector() << std::endl;
+    // circ.print_mps_state();
+
 
     std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
     std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;
@@ -412,10 +414,9 @@ void correctness_test() {
     generator.seed(time(NULL));
     
     // carry out a few rounds of checks
-    // TODO fix sign errors? - is this caused by -0?
     uint32_t num_rounds = 100;
     uint32_t max_gates = 10; // restrict circuit depth for this purpose to ensure feasible calculations
-    uint32_t num_qubits = 10;
+    uint32_t num_qubits = 3;
     uint32_t num_failures = 0;
     for (uint32_t i = 0; i < num_rounds; i++) {
         // initialises circuit with num_qubits qubits

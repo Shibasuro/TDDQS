@@ -487,10 +487,12 @@ std::vector<size_t> get_shape_as_vector(xarray<cd> &tensor) {
 // recursive implementation to convert arbitrary tensor into a TDD
 TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint16_t axis = 0) {
 
+    std::vector<size_t> new_shape = get_shape_as_vector(tensor);
+
     if (tensor.size() == 1) {
         // if terminal node, then just return trivial TDD with in_weight equal to weight
         // Shape can be left empty at this stage?
-        return TDD(cache_map.get_terminal_node(), tensor[0]);
+        return TDD(cache_map.get_terminal_node(), tensor[0], new_shape);
     }
 
     size_t dimension = tensor.shape()[0];
@@ -505,7 +507,6 @@ TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint16_t axis = 0) {
     cd weight = 1;
     cd normalisation_weight = 0;
     std::set<const TDD_Edge *> new_edge_set;
-    std::vector<size_t> new_shape = get_shape_as_vector(tensor);
     for (size_t i = 0; i < dimension; i++) {
         sv[0] = i;
         xarray<cd> new_tensor = strided_view(tensor, sv);

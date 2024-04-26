@@ -67,22 +67,22 @@ xarray<cd> phase_shift_gate(std::vector<double> params) {
 
 xarray<cd> rx_gate(std::vector<double> params) {
     double theta = params[0];
-    double c = cos(theta/2);
-    double s = sin(theta/2);
+    double c = cos(theta/2.0);
+    double s = sin(theta/2.0);
     return {{cd(c,0), cd(0,-s)}, {cd(0, -s), cd(c, 0)}};
 }
 
 xarray<cd> ry_gate(std::vector<double> params) {
     double theta = params[0];
-    double c = cos(theta/2);
-    double s = sin(theta/2);
+    double c = cos(theta/2.0);
+    double s = sin(theta/2.0);
     return {{cd(c,0), cd(-s, 0)}, {cd(s, 0), cd(c, 0)}};
 }
 
 xarray<cd> rz_gate(std::vector<double> params) {
     double theta = params[0];
-    double c = cos(theta/2);
-    double s = sin(theta/2);
+    double c = cos(theta/2.0);
+    double s = sin(theta/2.0);
     return {{cd(c, -s), cd(0,0)}, {cd(0,0), cd(c, s)}};
 }
 
@@ -92,8 +92,8 @@ xarray<cd> u_gate(std::vector<double> params) {
     double theta = params[0];
     double phi = params[1];
     double lambda = params[2];
-    double c = cos(theta/2);
-    double s = sin(theta/2);
+    double c = cos(theta/2.0);
+    double s = sin(theta/2.0);
     double cp = cos(phi);
     double sp = sin(phi);
     double cl = cos(lambda);

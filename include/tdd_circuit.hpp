@@ -259,7 +259,7 @@ class MPS_Circuit : public TDD_Circuit {
                     uint32_t target = instr.get_q1();
 
                     // only need to update the qubit the gate is being applied to
-                    state[target] = contract_tdds(state[target], gate_TDD, {0}, {1});
+                    state[target] = contract_tdds(gate_TDD, state[target], {1}, {0});
                 }
                 else {
                     // otherwise its a two qubit gate
@@ -297,29 +297,17 @@ class MPS_Circuit : public TDD_Circuit {
 
                     // index will be either 1 or 2 as it is MPS, each is either {2,1} or {2,1,1}
                     uint16_t q1_to_q2_bond_index;
-                    uint16_t q2_to_q1_bond_index;
-                    uint16_t gate_contraction_index = 1;
+                    // q2 will always use bond index one in this case (as it is going left)
+                    uint16_t q2_to_q1_bond_index = 1;
                     if (q1 < q2) {
                         if (q1 == 0) {
                             q1_to_q2_bond_index = 1;
                         }
                         else {
                             q1_to_q2_bond_index = 2;
-                            gate_contraction_index = 2;
-                        }
-                        // q2 will always use bond index one in this case (as it is going left)
-                        q2_to_q1_bond_index = 1;
-                    }
-                    else if (q2 < q1) {
-                        //q1 will always use bond index one in this case (as it is going left)
-                        q1_to_q2_bond_index = 1;
-                        if (q2 == 0) {
-                            q2_to_q1_bond_index = 1;
-                        }
-                        else {
-                            q2_to_q1_bond_index = 2;
                         }
                     }
+                    
                     std::vector<size_t> shape1 = state[q1].get_shape();
                     std::vector<size_t> shape2 = state[q2].get_shape();
 
@@ -336,28 +324,23 @@ class MPS_Circuit : public TDD_Circuit {
                     }
 
                     if (shape2.size() == 3) {
-                        if (q2_to_q1_bond_index == 1) {
-                            old_chi2 = shape2[2];
-                        }
-                        else {
-                            old_chi2 = shape2[1];
-                        }
+                        // always the case as q1 < q2
+                        old_chi2 = shape2[2];
                     }
 
                     // TODO? More efficient method might be to support reshaping of TDDs - not clear how to achieve this
-
                     // Contract the two parts of the MPS state
                     TDD intermediate = contract_tdds(state[q1], state[q2], {q1_to_q2_bond_index}, {q2_to_q1_bond_index});
-                    // mab, ncd ->
-                    // possibilities (1,1), (1,2), (2,1)
-                    // mnbd, mncb, mand
+                    // mab, nbc -> manc
+                    // or have mb, nbc -> mnc
+
 
                     // Contract intermediate with gate (ijmn) (important thing is to contract over m and n)
-                    TDD theta = contract_tdds(intermediate, gate_TDD, {0, gate_contraction_index}, {2, 3});
-                    // mnbd, ijmn -> ijbd
-                    // mncb, ijmn -> ijcb
-                    // mand, ijmn -> ijad
-                    // effectively want final output to be ibjc, ibjd or iajd
+                    // gate contraction index is the same as the q1_to_q2_bond_index
+                    TDD theta = contract_tdds(intermediate, gate_TDD, {0, q1_to_q2_bond_index}, {2, 3});
+                    // manc, ijmn -> ijac
+                    // mnc, ijmn -> ijc
+                    // effectively want final output to be iajc or i(1)jc
                     // so we need to do reshapes/swapaxes
 
                     // 2. Convert TDD to tensor for SVD
@@ -366,18 +349,10 @@ class MPS_Circuit : public TDD_Circuit {
                     // now that it is a tensor, we can apply the necessary reshape/axis swaps to get ibjc
                     // the reshapes handle the case where old_chi1 or old_chi2 is 1 before doing the axis swap
                     if (q1_to_q2_bond_index == q2_to_q1_bond_index) {
-                        // then ijbd, reshape to ibjd
+                        // then ijc, reshape to ij(1)c
                         theta_tensor.reshape({2, 2, old_chi1, old_chi2});
                     }
-                    else if (q2_to_q1_bond_index == 2) {
-                        // then ijcb, need to reshape to ibjc
-                        theta_tensor.reshape({2, 2, old_chi2, old_chi1});
-                        theta_tensor = swapaxes(theta_tensor, 2, 3);
-                    }
-                    else {
-                        // then ijad, reshape to iajd
-                        theta_tensor.reshape({2, 2, old_chi1, old_chi2});
-                    }
+                    // swap (1) and j or j and a to get required form
                     theta_tensor = swapaxes(theta_tensor, 1, 2);
 
                     // flatten to square matrix for SVD
@@ -392,10 +367,8 @@ class MPS_Circuit : public TDD_Circuit {
 
                     // 4. SVD Culling and Renormalisation (outputs new u, s, v)
                     // remove values that come from floating point errors;
-                    double double_error = 0.000001;
-                    filtration(u, real(u * conj(u)) < double_error) = 0;
+                    double double_error = 0.00001;
                     xarray<cd> temp_s = filter(s, real(s) > double_error);
-                    filtration(v, real(v * conj(v)) < double_error) = 0;
 
                     uint32_t new_chi = temp_s.size();
                     // if this would push us over the limit, then we restrict to max_chi at cost of fidelity
@@ -403,7 +376,7 @@ class MPS_Circuit : public TDD_Circuit {
                         new_chi = max_chi;
                     }
                     xarray<cd> u_prime = view(u, all(), range(0, new_chi));
-                    xarray<cd> s_prime = view(s, range(0, new_chi));
+                    xarray<cd> s_prime = view(temp_s, range(0, new_chi));
                     xarray<cd> v_prime = view(v, range(0, new_chi), all());
 
                     // renormalise s_prime
@@ -418,17 +391,12 @@ class MPS_Circuit : public TDD_Circuit {
 
                     if (shape1.size() > 2) {
                         q1_prime.reshape({2, old_chi1, new_chi});
-                        if (q1_to_q2_bond_index == 1) {
-                            q1_prime = swapaxes(q1_prime, 1, 2);
-                        }
                     }
 
                     q2_prime = swapaxes(q2_prime, 0, 1);
                     if (shape2.size() > 2) {
                         q2_prime.reshape({2, old_chi2, new_chi});
-                        if (q2_to_q1_bond_index == 1) {
-                            q2_prime = swapaxes(q2_prime, 1, 2);
-                        }
+                        q2_prime = swapaxes(q2_prime, 1, 2);
                     }
 
                     // 6. Convert back to TDD and update the state
@@ -461,6 +429,15 @@ class MPS_Circuit : public TDD_Circuit {
             num_qubits = qubits;
             initialise_state(bitstring, false);
             max_chi = max_bd;
+        }
+
+        void print_mps_state() {
+            for (uint32_t i = 0; i < num_qubits; i++) {
+                std::cout << "state for qubit " << i << ": " << std::endl;
+                xarray<cd> temp = convert_TDD_to_tensor(state[i]);
+                std::cout << temp << std::endl;
+                state[i] = convert_tensor_to_TDD(temp);
+            }
         }
 
         uint32_t get_num_qubits() {
@@ -510,12 +487,10 @@ class MPS_Circuit : public TDD_Circuit {
         // MORE EFFICIENT METHOD HERE
         // TODO make sure that this does not permanently create extra nodes
         // nor does it delete anything in the state
-        // TODO bugged currently - no longer crashes but produces incorrect probabilities?
-        // or maybe correct but not normalised?
-        // probabilities of all qubits sum to the same amount (not 1 though)
-        // is normalisation issue due to left/right? -> is this because of my SVD not keeping MPS in right gauge
+        // TODO can be extended to support arbitrary expectation values (so long as they are separable)
         double get_qubit_probability(uint16_t qubit, uint32_t val) {
             // calculate initial term, contracting from the right
+            // TODO investigate whether this is sufficiently efficient (for higher bond dimension its slow)
             TDD q_current;
             if (qubit == num_qubits - 1) {
                 q_current = kronecker_conjugate(state[num_qubits - 1].get_child_TDD(val));
