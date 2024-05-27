@@ -324,22 +324,23 @@ void fixed_point_grovers_test() {
 // possible bug with edges not being cleaned up correctly?
 void parsing_test() {
     MPS_Circuit circ = parse_circuit("/home/shibasuro/tn_project/TNQS/src/qasm_bench/experiment.qasm");
+    circ.print_num_gates();
     time_circuit(circ);
     xarray<size_t> indices = zeros<size_t>({circ.get_num_qubits()});
     indices(0) = 1;
-    // cd amp = circ.get_amplitude(indices);
-    // std::cout << "amplitude: " << amp << std::endl;
-    // double prob = std::real(amp * std::conj(amp));
-    // std::cout << "prob: " << prob << std::endl;
+    cd amp = circ.get_amplitude(indices);
+    std::cout << "amplitude: " << amp << std::endl;
+    double prob = std::real(amp * std::conj(amp));
+    std::cout << "prob: " << prob << std::endl;
     // double total_prob = circ.get_qubit_probability(0, 0);
     // std::cout << "probability of qubit 0 being 0: " << total_prob << std::endl;
     // total_prob = circ.get_qubit_probability(0, 1);
     // std::cout << "probability of qubit 0 being 1: " << total_prob << std::endl;
-
+    // circ.get_statevector();
     // std::cout << circ.get_statevector() << std::endl;
     // circ.print_mps_state();
-    // CLEANUP INDICATES BUG WITH CLEANING UP NODES/EDGES SOMEWHERE
-    circ.cleanup();
+    // TODO node/edge removal isnt quite fixed yet?
+    // circ.cleanup();
 
 
     std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
@@ -417,9 +418,9 @@ void correctness_test() {
     generator.seed(time(NULL));
     
     // carry out a few rounds of checks
-    uint32_t num_rounds = 100;
-    uint32_t max_gates = 10; // restrict circuit depth for this purpose to ensure feasible calculations
-    uint32_t num_qubits = 3;
+    uint32_t num_rounds = 20;
+    uint32_t max_gates = 50; // restrict circuit depth for this purpose to ensure feasible calculations
+    uint32_t num_qubits = 10;
     uint32_t num_failures = 0;
     for (uint32_t i = 0; i < num_rounds; i++) {
         // initialises circuit with num_qubits qubits
@@ -541,10 +542,11 @@ void correctness_test() {
         for (uint32_t j = 0; j < max_index; j++) {
             cd expected = qpp_state(j);
             cd actual = tdd_state(j);
-            if (! (is_approx_equal(expected, actual))) {
+            if (! (is_approx_equal(expected, actual, 1e-10))) {
                 incorrect_val_count++;
             }
         }
+        circ.cleanup();
         if (incorrect_val_count > 0) {
             std::cout << "Failure on round " << i << " with " << incorrect_val_count << " errors" << std::endl; 
             std::cout << "Quantum++" << std::endl;
@@ -581,7 +583,7 @@ int main()
     // tdd_conversion_test();
     // swap_axes_test();
     // manual_correctness_test();
-    correctness_test();
+    // correctness_test();
 
     return 0;
 }

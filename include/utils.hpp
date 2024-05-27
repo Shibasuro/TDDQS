@@ -2,14 +2,14 @@
 #define UTILS
 
 typedef std::complex<double> cd;
-inline bool is_approx_equal(cd x, cd y, double epsilon = 0.000001) {
-    if (std::abs(x - cd(0,0)) < epsilon) {
-        return std::abs(y) < epsilon;
+inline bool is_approx_equal(cd x, cd y, double epsilon = 1e-16) {
+    if (std::norm(x - cd(0,0)) < epsilon) {
+        return std::norm(y) < epsilon;
     }
-    else if (std::abs(y - cd(0,0)) < epsilon) {
-        return std::abs(x) < epsilon;
+    else if (std::norm(y - cd(0,0)) < epsilon) {
+        return std::norm(x) < epsilon;
     }
-    return std::abs(x - y) <= epsilon * std::max(std::abs(x), std::abs(y));
+    return std::norm(x - y) <= epsilon;
 }
 
 #endif

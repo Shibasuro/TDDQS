@@ -62,6 +62,7 @@ MPS_Circuit parse_circuit(std::string fname) {
                     // then need to add series of swap gates as well
                     uint32_t difference;
                     uint32_t q1_shifted = q1;
+                    uint32_t q2_shifted = q2;
                     if (q1 < q2) {
                         difference = q2 - q1;
                     }
@@ -70,10 +71,11 @@ MPS_Circuit parse_circuit(std::string fname) {
                     }
                     if (difference != 1) {
                         // apply swap gates until they are adjacent
+                        // make shift direction consistent (always shift left)
                         for (uint32_t i = 1; i < difference; i++) {
                             if (q1 < q2) {
-                                circ.swap(q1 + i - 1, q1 + i);
-                                q1_shifted++;
+                                circ.swap(q2 - i + 1, q2 - i);
+                                q2_shifted--;
                             }
                             else {
                                 circ.swap(q1 - i + 1, q1 - i);
@@ -82,15 +84,15 @@ MPS_Circuit parse_circuit(std::string fname) {
                         }
                     }
                     if (gate_type == "cx") {
-                        circ.cx(q1_shifted, q2);
+                        circ.cx(q1_shifted, q2_shifted);
                     }
                     // cp and cu1 are the same gate
                     else if (gate_type == "cu1" || gate_type == "cp") {
                         double lambda = gate->carg(0).constant_eval().value();
-                        circ.cu1(q1_shifted, q2, lambda);
+                        circ.cu1(q1_shifted, q2_shifted, lambda);
                     }
                     else if (gate_type == "swap") {
-                        circ.swap(q1_shifted, q2);
+                        circ.swap(q1_shifted, q2_shifted);
                     }
                     else {
                         std::cout << "Unsupported gate: " << gate_type << std::endl;
@@ -99,7 +101,7 @@ MPS_Circuit parse_circuit(std::string fname) {
                         // apply swap gates until they are back in original positions
                         for (uint32_t i = 1; i < difference; i++) {
                             if (q1 < q2) {
-                                circ.swap(q2 - i, q2 - i - 1);
+                                circ.swap(q1 + i, q1 + i + 1);
                             }
                             else {
                                 circ.swap(q2 + i, q2 + i + 1);

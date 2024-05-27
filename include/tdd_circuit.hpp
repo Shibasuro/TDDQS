@@ -138,7 +138,9 @@ class TDD_Circuit {
         }
 
         void simulate() {
+            uint32_t i = 0;
             for (Instruction instr : instructions) {
+                std::cout << "applying instr: " << i++ << std::endl;
                 apply_instruction(instr);
             }
         }
@@ -212,6 +214,9 @@ class TDD_Circuit {
             tdg(c2);
             cx(c1, c2);
         }
+        void print_num_gates() {
+            std::cout << instructions.size() << std::endl;
+        }
 };
 
 class MPS_Circuit : public TDD_Circuit {
@@ -219,6 +224,10 @@ class MPS_Circuit : public TDD_Circuit {
         uint32_t num_qubits;
         std::vector<TDD> state;
         std::vector<Instruction> instructions;
+        // Lambda stores the connections between each qubit
+        // for this need to update two qubit gate, amplitude, statevector etc
+        // measurement probability
+        std::vector<xarray<cd>> lambda;
         std::default_random_engine generator;
 
         uint32_t max_chi = std::numeric_limits<uint32_t>::max();
@@ -245,6 +254,10 @@ class MPS_Circuit : public TDD_Circuit {
                 }
                 tensor_state.reshape(shape);
                 state.push_back(convert_tensor_to_TDD(tensor_state));
+                if (i < num_qubits - 1) {
+                    // initially just 1 by 1 identity
+                    lambda.push_back({1.0});
+                }
             }
             generator.seed(time(NULL));
         }
@@ -299,13 +312,11 @@ class MPS_Circuit : public TDD_Circuit {
                     uint16_t q1_to_q2_bond_index;
                     // q2 will always use bond index one in this case (as it is going left)
                     uint16_t q2_to_q1_bond_index = 1;
-                    if (q1 < q2) {
-                        if (q1 == 0) {
-                            q1_to_q2_bond_index = 1;
-                        }
-                        else {
-                            q1_to_q2_bond_index = 2;
-                        }
+                    if (q1 == 0) {
+                        q1_to_q2_bond_index = 1;
+                    }
+                    else {
+                        q1_to_q2_bond_index = 2;
                     }
                     
                     std::vector<size_t> shape1 = state[q1].get_shape();
@@ -327,6 +338,31 @@ class MPS_Circuit : public TDD_Circuit {
                         // always the case as q1 < q2
                         old_chi2 = shape2[2];
                     }
+                    xarray<cd> temp1 = convert_TDD_to_tensor(state[q1]);
+                    state[q1] = convert_tensor_to_TDD(temp1);
+                    xarray<cd> temp2 = convert_TDD_to_tensor(state[q2]);
+                    state[q2] = convert_tensor_to_TDD(temp2);
+                    // absorb lambdas
+                    if (q1 > 0) {
+                        xarray<cd> left = diag(lambda[q1 - 1]);
+                        TDD lambda_left = convert_tensor_to_TDD(left);
+                        state[q1] = contract_tdds(state[q1], lambda_left, {1}, {1});
+                    }
+                    if (q2 < num_qubits - 1) {
+                        xarray<cd> right = diag(lambda[q2]);
+                        TDD lambda_right = convert_tensor_to_TDD(right);
+                        state[q2] = contract_tdds(state[q2], lambda_right, {2}, {0});
+                    }
+                    xarray<cd> bond = diag(lambda[q1]);
+                    TDD lambda_bond = convert_tensor_to_TDD(bond);
+                    state[q1] = contract_tdds(state[q1], lambda_bond, {q1_to_q2_bond_index}, {0});
+
+                    // intermediate seems to have wrong norm, is this due to contractions with lambdas?
+                    // or due to contractions with each other?
+                    temp1 = convert_TDD_to_tensor(state[q1]);
+                    state[q1] = convert_tensor_to_TDD(temp1);
+                    temp2 = convert_TDD_to_tensor(state[q2]);
+                    state[q2] = convert_tensor_to_TDD(temp2);
 
                     // TODO? More efficient method might be to support reshaping of TDDs - not clear how to achieve this
                     // Contract the two parts of the MPS state
@@ -367,23 +403,43 @@ class MPS_Circuit : public TDD_Circuit {
 
                     // 4. SVD Culling and Renormalisation (outputs new u, s, v)
                     // remove values that come from floating point errors;
-                    double double_error = 0.00001;
-                    xarray<cd> temp_s = filter(s, real(s) > double_error);
+                    double double_error = 1e-16;
+                    s = filter(s, real(s) > double_error);
+                    // Remove smallest schmidt coefficients such that sum of squares is less
+                    // than truncation threshold
+                    double truncation_threshold = 1e-16;
+                    // TODO s_norm manages to become != 1 at some points for some reason
+                    std::cout << "s_norm: " << std::real(sum(s*s)(0)) << std::endl;
+                    uint32_t new_chi = s.size();
+                    double sum_squares = 0;
+                    for (uint32_t i = new_chi - 1; i > 0; i--) {
+                        if ((sum_squares + std::norm(s(i))) < truncation_threshold) {
+                            if (i == 1) {
+                                new_chi = 1;
+                            }
+                            sum_squares += std::norm(s(i));
+                        }
+                        else {
+                            new_chi = i + 1;
+                            break;
+                        }
+                    }
 
-                    uint32_t new_chi = temp_s.size();
                     // if this would push us over the limit, then we restrict to max_chi at cost of fidelity
                     if (new_chi > max_chi) {
                         new_chi = max_chi;
                     }
+                    std::cout << "new_chi: " << new_chi << std::endl;
                     xarray<cd> u_prime = view(u, all(), range(0, new_chi));
-                    xarray<cd> s_prime = view(temp_s, range(0, new_chi));
+                    xarray<cd> s_prime = view(s, range(0, new_chi));
                     xarray<cd> v_prime = view(v, range(0, new_chi), all());
 
                     // renormalise s_prime
                     s_prime *= pow( sum(s * s) / sum(s_prime * s_prime), 0.5);
 
                     // 5. Calculate new tensors for q1 and q2
-                    xarray<cd> q1_prime = linalg::dot(u_prime, diag(s_prime));
+                    xarray<cd> q1_prime = u_prime;//linalg::dot(u_prime, diag(s_prime));
+                    lambda[q1] = s_prime;
                     xarray<cd> q2_prime = v_prime;
                     
                     // these matrices come out as (2*old_chi1, new_chi)
@@ -397,6 +453,16 @@ class MPS_Circuit : public TDD_Circuit {
                     if (shape2.size() > 2) {
                         q2_prime.reshape({2, old_chi2, new_chi});
                         q2_prime = swapaxes(q2_prime, 1, 2);
+                    }
+
+                    if (q1 > 0) {
+                        xarray<cd> lambda_left = diag(1.0 / lambda[q1 - 1]);
+                        q1_prime = linalg::tensordot(q1_prime, lambda_left, {1}, {1});
+                        q1_prime = swapaxes(q1_prime, {1}, {2});
+                    }
+                    if (q2 < num_qubits - 1) {
+                        xarray<cd> lambda_right = diag(1.0 / lambda[q2]);
+                        q2_prime = linalg::tensordot(q2_prime, lambda_right, {2}, {0});
                     }
 
                     // 6. Convert back to TDD and update the state
@@ -457,8 +523,15 @@ class MPS_Circuit : public TDD_Circuit {
             // and thus dimension 2)
             TDD amalgam = state[0].get_child_TDD(indices[0]);
             for (size_t i = 1; i < num_qubits; i++) {
-                TDD next_to_contract = state[i].get_child_TDD(indices[i]);
+                // always absorb left lambda first
+                xarray<cd> left = diag(lambda[i - 1]);
+                TDD lambda_left = convert_tensor_to_TDD(left);
+                // leave as false as we do not want to delete the old state[i]
+                TDD next_state = contract_tdds(state[i], lambda_left, {1}, {1}, 0, false);
+                lambda_left.cleanup();
+                TDD next_to_contract = next_state.get_child_TDD(indices[i]);
                 amalgam = contract_tdds(amalgam, next_to_contract, {0}, {0}, 0, false);
+                next_state.cleanup();
             }
             return amalgam.get_weight();
         }
@@ -473,7 +546,12 @@ class MPS_Circuit : public TDD_Circuit {
             // (2,2,2,2)
             TDD amalgam = state[0];
             for (uint16_t i = 1; i < num_qubits; i++) {
-                TDD next_to_contract = state[i];
+                // always absorb left lambda first
+                xarray<cd> left = diag(lambda[i - 1]);
+                TDD lambda_left = convert_tensor_to_TDD(left);
+                // leave as false as we do not want to delete the old state[i]
+                TDD next_to_contract = contract_tdds(state[i], lambda_left, {1}, {1}, 0, false);
+                lambda_left.cleanup();
                 amalgam = contract_tdds(amalgam, next_to_contract, {i}, {1}, 0, false);
             }
             // this gives the statevector in amalgam
@@ -486,7 +564,11 @@ class MPS_Circuit : public TDD_Circuit {
         xarray<cd> get_statevector() {
             TDD amalgam = state[0];
             for (uint16_t i = 1; i < num_qubits; i++) {
-                TDD next_to_contract = state[i];
+                xarray<cd> left = diag(lambda[i - 1]);
+                TDD lambda_left = convert_tensor_to_TDD(left);
+                // leave as false as we do not want to delete the old state[i]
+                TDD next_to_contract = contract_tdds(state[i], lambda_left, {1}, {1}, 0, false);
+                lambda_left.cleanup();
                 amalgam = contract_tdds(amalgam, next_to_contract, {i}, {1}, 0, false);
             }
             // statevector is in amalgam, just convert to tensor
@@ -495,12 +577,12 @@ class MPS_Circuit : public TDD_Circuit {
 
         // val can be either 0 or 1
         // MORE EFFICIENT METHOD HERE
-        // TODO make sure that this does not permanently create extra nodes
-        // nor does it delete anything in the state
         // TODO can be extended to support arbitrary expectation values (so long as they are separable)
         double get_qubit_probability(uint16_t qubit, uint32_t val) {
             // calculate initial term, contracting from the right
             // TODO investigate whether this is sufficiently efficient (for higher bond dimension its slow)
+
+            // TODO need to absorb lambdas here somewhere
             TDD q_current;
             if (qubit == num_qubits - 1) {
                 q_current = kronecker_conjugate(state[num_qubits - 1].get_child_TDD(val));
@@ -516,18 +598,32 @@ class MPS_Circuit : public TDD_Circuit {
             for (uint32_t j = 0; j < num_qubits - 1; j++) {
                 uint32_t i = num_qubits - 2 - j;
                 TDD q_temp;
+                TDD current_state = state[i];
+                //absorb right lambda into the state, since i will be between 0 and num_qubits - 2
+                xarray<cd> right = diag(lambda[i]);
+                TDD lambda_right = convert_tensor_to_TDD(right);
+                // dont delete current_state here as we need to preserve state[q2]
+                uint16_t bond_index = 2;
+                if (i == 0) {
+                    bond_index = 1;
+                }
+                TDD next_state = contract_tdds(current_state, lambda_right, {bond_index}, {0}, 0, false);
+                // but we can cleanup lambda_right here
+                lambda_right.cleanup();
                 if (i == qubit) {
                     // then we can index by val
-                    q_temp = kronecker_conjugate(state[i].get_child_TDD(val));
+                    q_temp = kronecker_conjugate(next_state.get_child_TDD(val));
                 }
                 else {
                     std::vector<TDD> tdds;
-                    TDD child0 = state[i].get_child_TDD(0);
-                    TDD child1 = state[i].get_child_TDD(1);
+                    TDD child0 = next_state.get_child_TDD(0);
+                    TDD child1 = next_state.get_child_TDD(1);
                     tdds.push_back(kronecker_conjugate(child0));
                     tdds.push_back(kronecker_conjugate(child1));
                     q_temp = add_tdds(tdds);
                 }
+                // clean up next_state
+                next_state.cleanup();
                 if (i > 0) {
                     q_current = contract_tdds(q_temp, q_current, {1, 3}, {0, 1});
                 }
