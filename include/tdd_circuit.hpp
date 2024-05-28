@@ -521,6 +521,7 @@ class MPS_Circuit : public TDD_Circuit {
         cd get_amplitude(xarray<size_t> indices) override {
             // these indices should all be 0 or 1 (as they are the physical indices
             // and thus dimension 2)
+            // TODO get_amplitude is not cleaning up some nodes/edges
             TDD amalgam = state[0].get_child_TDD(indices[0]);
             for (size_t i = 1; i < num_qubits; i++) {
                 // always absorb left lambda first
@@ -529,8 +530,15 @@ class MPS_Circuit : public TDD_Circuit {
                 // leave as false as we do not want to delete the old state[i]
                 TDD next_state = contract_tdds(state[i], lambda_left, {1}, {1}, 0, false);
                 lambda_left.cleanup();
+                // I think problem is with cleaning up the next_state and the old amalgam
                 TDD next_to_contract = next_state.get_child_TDD(indices[i]);
-                amalgam = contract_tdds(amalgam, next_to_contract, {0}, {0}, 0, false);
+                TDD temp = contract_tdds(amalgam, next_to_contract, {0}, {0}, 0, false);
+                // cleanup the old amalgam, then update it
+                if (i > 1) {
+                    // only clean up contracted amalgams (not state[0])
+                    amalgam.cleanup();
+                }
+                amalgam = temp;
                 next_state.cleanup();
             }
             return amalgam.get_weight();

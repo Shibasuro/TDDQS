@@ -339,8 +339,7 @@ void parsing_test() {
     // circ.get_statevector();
     // std::cout << circ.get_statevector() << std::endl;
     // circ.print_mps_state();
-    // TODO node/edge removal isnt quite fixed yet?
-    // circ.cleanup();
+    circ.cleanup();
 
 
     std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
