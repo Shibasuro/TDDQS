@@ -12,6 +12,8 @@
 #include "simulator.hpp"
 #include "parser.hpp"
 #include "qpp/qpp.h"
+#include <fstream>
+#include <sstream>
 
 #include <chrono>
 
@@ -24,6 +26,18 @@ void time_circuit(TDD_Circuit &circuit) {
     std::chrono::duration<double, std::milli> ms_double = t2 - t1;
 
     std::cout << "Time taken: " << ms_double.count() << "ms" << std::endl;
+}
+
+void print_max_memory_usage() {
+    std::ifstream infile("/proc/self/status");
+    std::string line;
+    std::cout << std::endl << std::endl;
+    std::cout << "Printing /proc/self/status.." << std::endl;
+    std::cout << std::endl;
+    while (std::getline(infile, line)) {
+        std::cout << line << std::endl;
+    }
+    std::cout << std::endl;
 }
 
 void tn_test() {
@@ -332,6 +346,7 @@ void parsing_test() {
     std::cout << "amplitude: " << amp << std::endl;
     double prob = std::real(amp * std::conj(amp));
     std::cout << "prob: " << prob << std::endl;
+
     // double total_prob = circ.get_qubit_probability(0, 0);
     // std::cout << "probability of qubit 0 being 0: " << total_prob << std::endl;
     // total_prob = circ.get_qubit_probability(0, 1);
@@ -339,7 +354,7 @@ void parsing_test() {
     // circ.get_statevector();
     // std::cout << circ.get_statevector() << std::endl;
     // circ.print_mps_state();
-    circ.cleanup();
+    // circ.cleanup();
 
 
     std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
@@ -520,6 +535,7 @@ void correctness_test() {
                     circ.swap(qubit1, qubit2);
                     qc.gate(qpp::gt.SWAP, qubit1, qubit2);
                     break;
+                // TODO add U and U1 gate tests?
             }
         }
         // actually run the simulation
@@ -563,6 +579,8 @@ void correctness_test() {
 
 // to record memory usage, can run with valgrind --tool=massif./build/apps/program
 // and then print out with ms_print <massif_file>
+// can check peak memory usage using code /proc/self/status to check VM peak
+// grep VmPeak /proc/$PID/status  
 // Is this a good way to record memory usage? increases time complexity
 // Might be better to track with node counts
 // Want to record peak memory usage
@@ -583,6 +601,7 @@ int main()
     // swap_axes_test();
     // manual_correctness_test();
     // correctness_test();
+    print_max_memory_usage();
 
     return 0;
 }

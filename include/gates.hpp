@@ -86,6 +86,14 @@ xarray<cd> rz_gate(std::vector<double> params) {
     return {{cd(c, -s), cd(0,0)}, {cd(0,0), cd(c, s)}};
 }
 
+xarray<cd> u1_gate(std::vector<double> params) {
+    double lambda = params[0];
+    xarray<cd> u1 = zeros<cd>({2,2});
+    u1(0,0) = cd(1,0);
+    u1(1,1) = cd(cos(lambda),sin(lambda));
+    return u1;
+}
+
 // simulates OpenQASM U gate - arbitrary single-qubit rotation
 
 xarray<cd> u_gate(std::vector<double> params) {
@@ -100,7 +108,7 @@ xarray<cd> u_gate(std::vector<double> params) {
     double sl = sin(lambda);
     double clp = cos(lambda + phi);
     double slp = sin(lambda + phi);
-    return {{cd(c, 0), cd(-s * cl, -s * -sl)}, {cd(s * cp, s * -sp), cd(c * clp, c * slp)}};
+    return {{cd(c, 0), cd(-s * cl, -s * sl)}, {cd(s * cp, s * sp), cd(c * clp, c * slp)}};
 }
 
 // Non-parametric two qubit gates

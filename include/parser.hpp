@@ -50,6 +50,16 @@ MPS_Circuit parse_circuit(std::string fname) {
                     else if (gate_type == "tdg") {
                         circ.tdg(q1);
                     }
+                    else if (gate_type == "u1") {
+                        double lambda = gate->carg(0).constant_eval().value();
+                        circ.u1(q1, lambda);
+                    }
+                    else if (gate_type == "u3") {
+                        double theta = gate->carg(0).constant_eval().value();
+                        double phi = gate->carg(1).constant_eval().value();
+                        double lambda = gate->carg(2).constant_eval().value();
+                        circ.u(q1, theta, phi, lambda);
+                    }
                     else {
                         std::cout << "Unsupported gate: " << gate_type << std::endl;
                     }

@@ -185,6 +185,14 @@ class TDD_Circuit {
             add_instruction(Instruction(Instr_type::GATE, Gate(&rz_gate, true, {theta}), q1));
         }
 
+        void u1(uint32_t q1, double lambda) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&u1_gate, true, {lambda}), q1));
+        }
+
+        void u(uint32_t q1, double theta, double phi, double lambda) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&u_gate, true, {theta, phi, lambda}), q1));
+        }
+
         void cx(uint32_t c1, uint32_t t1) {
             add_instruction(Instruction(Instr_type::GATE, Gate(&controlled_not_gate, false), c1, t1));
         }
