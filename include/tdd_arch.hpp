@@ -237,14 +237,23 @@ class TDD_Map {
         uint64_t max_nodes = 0;
         uint64_t max_edges = 0;
 
+        uint64_t max_memory_usage = 0;
+        uint64_t approximate_memory_usage = 0;
+
         void check_nodes() {
             if (node_map.size() > max_nodes) {
                 max_nodes = node_map.size();
+            }
+            if (approximate_memory_usage > max_memory_usage) {
+                max_memory_usage = approximate_memory_usage;
             }
         }
         void check_edges() {
             if (edge_map.size() > max_edges) {
                 max_edges = edge_map.size();
+            }
+            if (approximate_memory_usage > max_memory_usage) {
+                max_memory_usage = approximate_memory_usage;
             }
         }
 
@@ -253,12 +262,21 @@ class TDD_Map {
         const TDD_Node *add_node(TDD_Node node) {
             check_nodes();
             auto pr = node_map.emplace(node, 1);
+            size_t dim = node.get_dimension();
             auto it = pr.first;
             if (!pr.second) {
                 // if it already exists, increment refcount unless it is terminal;
                 if (!node.is_terminal()) {
                     it->second++;
                 }
+            }
+            else {
+                // otherwise its a new node, increase estimated memory
+                // one uint16_t for axis_index and then a vector of pointers
+                // vector of pointers has 3 pointers for vector, + dim pointers for contents
+                approximate_memory_usage += 16;
+                approximate_memory_usage += 3 * 64;
+                approximate_memory_usage += dim * 64;
             }
 
             return &(it->first);
@@ -273,6 +291,12 @@ class TDD_Map {
                 // if it already exists, increment refcount;
                 it->second++;
             }
+            else {
+                // if its a new edge, then increase memory usage
+                // one 64 bit pointer and one complex double
+                approximate_memory_usage += 64;
+                approximate_memory_usage += 128;
+            }
 
             return &(it->first);
         }
@@ -281,6 +305,7 @@ class TDD_Map {
         void remove_node_ref(const TDD_Node *node, bool del = true) {
             check_nodes();
             TDD_Node temp = *node;
+            size_t dim = temp.get_dimension();
             // if node is terminal, do not change refcount
             if (temp.is_terminal()) {
                 return;
@@ -291,6 +316,12 @@ class TDD_Map {
                 if (it->second == 0 && del) {
                     // then remove the node
                     node_map.erase(it);
+                    // also delete the nodes estimated memory usage
+                    // one uint16_t for axis_index and then a vector of pointers
+                    // vector of pointers has 3 pointers for vector, + dim pointers for contents
+                    approximate_memory_usage -= 16;
+                    approximate_memory_usage -= 3 * 64;
+                    approximate_memory_usage -= dim * 64;
                 }
             }
         }
@@ -305,8 +336,12 @@ class TDD_Map {
             if (it != edge_map.end()) {
                 it->second -= 1;
                 if (it->second == 0) {
-                    // then remove the node
+                    // then remove the edge
                     edge_map.erase(it);
+                    // delete from estimated memory usage as well
+                    // one 64 bit pointer and one complex double
+                    approximate_memory_usage -= 64;
+                    approximate_memory_usage -= 128;
                 }
             }
         }
@@ -352,6 +387,9 @@ class TDD_Map {
         }
         // would be nice to be able to estimate memory cost here, idk how though
         // since nodes can have different numbers of successors, just measuring number of nodes/edges isnt a fair assessment
+        uint64_t get_max_memory_usage() {
+            return max_memory_usage;
+        }
         
 };
 

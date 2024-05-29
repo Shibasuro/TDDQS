@@ -342,10 +342,15 @@ void parsing_test() {
     time_circuit(circ);
     xarray<size_t> indices = zeros<size_t>({circ.get_num_qubits()});
     indices(0) = 1;
-    cd amp = circ.get_amplitude(indices);
-    std::cout << "amplitude: " << amp << std::endl;
-    double prob = std::real(amp * std::conj(amp));
-    std::cout << "prob: " << prob << std::endl;
+    // cd amp = circ.get_amplitude(indices);
+    // std::cout << "amplitude: " << amp << std::endl;
+    // double prob = std::real(amp * std::conj(amp));
+    // std::cout << "prob: " << prob << std::endl;
+
+    uint64_t approx_max_memory_usage = cache_map.get_max_memory_usage() + circ.estimate_memory_usage();
+
+    std::cout << "approximate max memory usage in bits: " << approx_max_memory_usage << std::endl;
+    std::cout << "approximate max memory usage in kb: " << convert_bits_to_kb(approx_max_memory_usage) << std::endl;
 
     // double total_prob = circ.get_qubit_probability(0, 0);
     // std::cout << "probability of qubit 0 being 0: " << total_prob << std::endl;
@@ -601,7 +606,7 @@ int main()
     // swap_axes_test();
     // manual_correctness_test();
     // correctness_test();
-    print_max_memory_usage();
+    // print_max_memory_usage();
 
     return 0;
 }

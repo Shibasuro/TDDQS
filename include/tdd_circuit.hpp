@@ -666,6 +666,28 @@ class MPS_Circuit : public TDD_Circuit {
             return probabilities;
         }
 
+        uint64_t estimate_memory_usage() {
+            // initialise to 64 bits for the two 32 bit integers
+            uint64_t approximate_memory_usage = 64;
+            for (uint32_t i = 0; i < num_qubits; i++) {
+                // add memory for each TDD
+                // consists of pointer, complex double, uint16_t and a vector of size_t for the shape
+                approximate_memory_usage += 64;
+                approximate_memory_usage += 128;
+                approximate_memory_usage += 16;
+                // for vector housekeeping
+                approximate_memory_usage += 3 * 64;
+                // for vector elements
+                uint64_t dim = state[i].get_shape().size();
+                approximate_memory_usage += dim * sizeof(size_t);
+                // now add lambdas as well
+                if (i < num_qubits - 1) {
+                    approximate_memory_usage += 128 * lambda[i].size();
+                }
+            }
+            return approximate_memory_usage;
+        }
+
         void measure(uint16_t qubit) {
             double p0 = get_qubit_probability(qubit, 0);
             double rand_val = uniform_rand_in_range(0.0, 1.0);
