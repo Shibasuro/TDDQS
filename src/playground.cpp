@@ -346,6 +346,8 @@ void parsing_test() {
     // std::cout << "amplitude: " << amp << std::endl;
     // double prob = std::real(amp * std::conj(amp));
     // std::cout << "prob: " << prob << std::endl;
+    circ.print_tensor_space_time();
+    cache_map.print_time();
 
     uint64_t approx_max_memory_usage = cache_map.get_max_memory_usage() + circ.estimate_memory_usage();
 
@@ -418,11 +420,30 @@ void manual_correctness_test() {
 
     // display the final state on demand
     std::cout << "Quantum++: \n";
-    std::cout << qpp::disp(q_engine.get_state()) << '\n';
+    std::cout << qpp::disp(qpp::transpose(q_engine.get_state())) << '\n';
 
     MPS_Circuit circ = parse_circuit("/home/shibasuro/tn_project/TNQS/src/qasm_bench/experiment.qasm");
     time_circuit(circ);
     std::cout << "TDDQS: \n" << circ.get_statevector() << std::endl;
+
+    // CAN USE THIS FOR AUTOMATIC CHECKING FOR SMALLER CIRCUITS
+    auto qpp_state = qpp::transpose(q_engine.get_state());
+    xarray<cd> tdd_state = circ.get_statevector();
+    // these should be num_qubit statevectors, so just compare index by index?
+    uint32_t max_index = (uint32_t)pow(2, 6);
+    // convert tdd_state to vector
+    tdd_state.reshape({max_index});
+    uint32_t incorrect_val_count = 0;
+    for (uint32_t j = 0; j < max_index; j++) {
+        cd expected = qpp_state(j);
+        cd actual = tdd_state(j);
+        if (! (is_approx_equal(expected, actual, 1e-10))) {
+            incorrect_val_count++;
+        }
+    }
+    if (incorrect_val_count == 0) {
+        std::cout << "ayy" << std::endl;
+    }
 }
 
 void correctness_test() {
@@ -439,12 +460,13 @@ void correctness_test() {
     // carry out a few rounds of checks
     uint32_t num_rounds = 20;
     uint32_t max_gates = 50; // restrict circuit depth for this purpose to ensure feasible calculations
-    uint32_t num_qubits = 10;
+    uint32_t num_qubits = 3;
     uint32_t num_failures = 0;
     for (uint32_t i = 0; i < num_rounds; i++) {
         // initialises circuit with num_qubits qubits
         qpp::QCircuit qc{num_qubits, 0};
         MPS_Circuit circ{num_qubits};
+        std::cout << "Trial: " << i << std::endl;
         // now apply max_gates gates at random
         for (uint32_t j = 0; j < max_gates; j++) {
             std::uniform_int_distribution<uint32_t> qubit_distribution(0, num_qubits - 1);
@@ -604,7 +626,7 @@ int main()
     parsing_test();
     // tdd_conversion_test();
     // swap_axes_test();
-    // manual_correctness_test();
+    manual_correctness_test();
     // correctness_test();
     // print_max_memory_usage();
 

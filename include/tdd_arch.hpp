@@ -202,7 +202,18 @@ class TDD_Node {
         }
 
         bool operator==(const TDD_Node &other) const {
-            return (axis_index == other.get_axis_index() && successors == other.get_successors());
+            if (axis_index != other.get_axis_index()){
+                return false;
+            }
+            if (get_dimension() != other.get_dimension()) {
+                return false;
+            }
+            for (size_t i = 0; i < get_dimension(); i++) {
+                if (get_successor_ref(i) != other.get_successor_ref(i)) {
+                    return false;
+                }
+            }
+            return true;
         }
 };
 
@@ -217,10 +228,20 @@ struct std::hash<TDD_Node> {
     std::size_t operator()(const TDD_Node& t) const {
         size_t total = 0;
         for (size_t i = 0; i < t.get_dimension(); i++) {
-            total ^= hash<const TDD_Edge *>()(t.get_successor_ref(i)) << (i % 3);
-            total = total >> (i % 3);
+            size_t x = hash<const TDD_Edge *>()(t.get_successor_ref(i)) << (i % 3);
+            total ^= x + 0x9e3779b9 + (total << 6) + (total >> 2);
         }
         return total ^ (hash<uint16_t>()(t.get_axis_index()) << 1);
+        // size_t seed = t.get_dimension();
+        // for (size_t i = 0; i < t.get_dimension(); i++) {
+        //     const TDD_Edge* edge = t.get_successor_ref(i);
+        //     size_t x = (size_t)(edge);
+        //     x = ((x >> 16) ^ x) * 0x45d9f3b;
+        //     x = ((x >> 16) ^ x) * 0x45d9f3b;
+        //     x = (x >> 16) ^ x;
+        //     seed ^= x + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        // }
+        // return seed ^ (hash<uint16_t>()(t.get_axis_index()) << 1);
     }
 };
 
@@ -239,6 +260,7 @@ class TDD_Map {
 
         uint64_t max_memory_usage = 0;
         uint64_t approximate_memory_usage = 0;
+        double time = 0;
 
         void check_nodes() {
             if (node_map.size() > max_nodes) {
@@ -367,6 +389,14 @@ class TDD_Map {
 
         uint64_t peak_edges() {
             return max_edges;
+        }
+
+        void inc_time(double t) {
+            time += t;
+        }
+
+        void print_time() {
+            std::cout << "Time taken for specific task: " << time << "ms" << std::endl;
         }
         
         void print_maps() {
@@ -640,15 +670,15 @@ TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint16_t axis = 0) {
 // so can save on memory by no longer adding to the set)
 // assumes all TDDs have the same index set and axis (i.e. same shape)
 // Addition is a shape preserving operation
+// TODO could tailor make a add_2_tdds to increase efficiency when only 2 tdds
+// worst case time complexity is O(tdds.size() * product of shape elements)
 TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
-    std::vector<const TDD_Node *> roots;
     std::set<const TDD_Node *> root_set;
     cd weight_sum = 0;
     uint16_t min_axis_index = tdds[0].get_root()->get_axis_index();
     size_t dimension = tdds[0].get_root()->get_dimension();
     for (TDD tdd : tdds) {
         const TDD_Node *current_root = tdd.get_root();
-        roots.push_back(current_root);
 
         // set to keep track of whether they are all equal
         root_set.insert(current_root);
@@ -672,7 +702,7 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
             tdds[i].cleanup();
         }
         // shape should also be unchanged
-        return TDD(roots[0], weight_sum, tdds[0].get_shape(), tdds[0].get_axis_offset());
+        return TDD(tdds[0].get_root(), weight_sum, tdds[0].get_shape(), tdds[0].get_axis_offset());
     }
 
     // otherwise start generating new node, with the minimum axis index
@@ -690,8 +720,8 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
         std::vector<TDD> sub_tdds;
         // calculate correct sub_tdds for each tdd being added
         // indexed over the current index
-        for (size_t j = 0; j < roots.size(); j++) {
-            const TDD_Node *root = roots[j];
+        for (size_t j = 0; j < tdds.size(); j++) {
+            const TDD_Node *root = tdds[j].get_root();
             // if the axis index is equal to the currently processed one
             // then we can index it directly
             if (root->get_axis_index() == min_axis_index) {
@@ -722,13 +752,12 @@ TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
             normalisation_weight = next_weight;
             next_weight = 1;
         }
-
         new_edge_set.insert(new_node.add_successor(next_node, next_weight));
     }
 
     //we can now clean up the summands used at this step (any of those with axis_index == min_axis_index)
-    for (size_t i = 0; i < roots.size(); i++) {
-        const TDD_Node *root = roots[i];
+    for (size_t i = 0; i < tdds.size(); i++) {
+        const TDD_Node *root = tdds[i].get_root();
         // only clean up if we actually used the index at this stage
         if (root->get_axis_index() == min_axis_index) {
             // only delete the edges at this stage in case the next case is base case
@@ -841,7 +870,7 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
     const TDD_Node *f_root = first.get_root();
     const TDD_Node *s_root = second.get_root();
 
-    // start generating new node, with the minimum axis index
+    // start generating new node, with the next axis index
     TDD_Node new_node(axis);
     cd weight = 1;
 
@@ -1016,21 +1045,6 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
         // this will automatically clean up the summands too
         return add_tdds(new_tdds);
     }
-
-    // clean up no longer needed elements
-    // Only cleanup if we have actually progressed the pointer at this step
-    // problem is that we have a successor of new node being the same as a successor of f_root or s_root?
-    // TODO investigate possibility of more efficient cleanup
-    // if (first_axis <= f_root->get_axis_index() && !f_root->is_terminal() && indexing_scheme == 1) {
-    //     // seems to cause issues without this edge being added, this is due to implementation of add
-    //     // problem is that its not distinct from f_roots successors
-    //     //cache_map.add_edge(*(f_root->get_successor_ref(0)));
-    //     //f_root->clear_successors();
-    // }
-    // if (second_axis <= s_root->get_axis_index() && !s_root->is_terminal() && indexing_scheme == 2) {
-    //     //cache_map.add_edge(*(s_root->get_successor_ref(0)));
-    //     //s_root->clear_successors();
-    // }
 
     // reduce the TDD
     weight *= normalisation_weight;

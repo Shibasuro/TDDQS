@@ -43,6 +43,14 @@ MPS_Circuit parse_circuit(std::string fname) {
                     else if (gate_type == "sx") {
                         circ.sx(q1);
                     }
+                    else if (gate_type == "rx") {
+                        double theta = gate->carg(0).constant_eval().value();
+                        circ.rx(q1, theta);
+                    }
+                    else if (gate_type == "ry") {
+                        double theta = gate->carg(0).constant_eval().value();
+                        circ.ry(q1, theta);
+                    }
                     else if (gate_type == "rz") {
                         double theta = gate->carg(0).constant_eval().value();
                         circ.rz(q1, theta);
@@ -50,9 +58,15 @@ MPS_Circuit parse_circuit(std::string fname) {
                     else if (gate_type == "tdg") {
                         circ.tdg(q1);
                     }
-                    else if (gate_type == "u1") {
+                    else if (gate_type == "u1" || gate_type == "p") {
                         double lambda = gate->carg(0).constant_eval().value();
                         circ.u1(q1, lambda);
+                    }
+                    else if (gate_type == "u2") {
+                        double phi = gate->carg(0).constant_eval().value();
+                        double lambda = gate->carg(1).constant_eval().value();
+                        double pi_half = M_PI / 2.0;
+                        circ.u(q1, pi_half, phi, lambda);
                     }
                     else if (gate_type == "u3") {
                         double theta = gate->carg(0).constant_eval().value();
