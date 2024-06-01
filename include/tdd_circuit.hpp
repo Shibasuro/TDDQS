@@ -361,7 +361,7 @@ class MPS_Circuit : public TDD_Circuit {
             state[target] = TDD(new_node_ptr, new_weight, shape);
         }
 
-        // WIP, TODO fix crashes and do proper cleanup
+        // WIP, TODO do proper cleanup
         void absorb_lambda(uint32_t qubit, bool left = true, bool mult = true) {
             xarray<cd> lambda_local;
             if (left) {
@@ -385,7 +385,8 @@ class MPS_Circuit : public TDD_Circuit {
                 TDD_Node new_root(0);
                 cd global_normalisation_weight = 0;
                 for (uint32_t i = 0; i < first_dim; i++) {
-                    // need to get left and right children first
+                    // need to get 0 and 1 children and treat separately
+                    // unless first_dim is 1, i.e. 0-child == 1-child
                     const TDD_Node* i_state;
                     cd old_weight;
                     if (first_dim == 1) {
@@ -427,7 +428,6 @@ class MPS_Circuit : public TDD_Circuit {
                         }
                         else {
                             // otherwise we skipped this axis, so need to make new node with weight from lambda
-                            //TODO something wrong in this case?
                             cd new_edge_weight = lambda_local(j) / normalisation_weight;
                             const TDD_Node* new_node_ptr = cache_map.add_node(new_node);
                             cache_map.remove_node_ref(new_node_ptr, false);
@@ -442,6 +442,11 @@ class MPS_Circuit : public TDD_Circuit {
                         normalisation_weight = 1;
                     }
                     old_weight *= normalisation_weight;
+                    if (i_state->get_axis_index() != 1) {
+                        i_state->cleanup();
+                    }
+                    // delete the old i_state
+                    cache_map.remove_node_ref(i_state);
                     if (new_edge_set.size() == 1) {
                         // if all the successors are the same, then that means we do not need this node, instead
                         // direct the tdd to the successor node with the in weight
@@ -454,22 +459,26 @@ class MPS_Circuit : public TDD_Circuit {
                         // then new_node_ptr is the new_node to pass up to the parent
                         if (first_dim == 1) {
                             state[qubit] = TDD(new_node_ptr, new_in_weight * global_normalisation_weight, tstate.get_shape());
+                            cache_map.remove_node_ref(tstate.get_root());
                             return;
                         }
+                        cache_map.remove_node_ref(new_node_ptr, false);
                         new_root.add_successor(new_node_ptr, old_weight);
                     }
                     else {
                         const TDD_Node *new_node_ptr = cache_map.add_node(new_i_child);
                         if (first_dim == 1) {
                             state[qubit] = TDD(new_node_ptr, new_in_weight * global_normalisation_weight, tstate.get_shape());
+                            cache_map.remove_node_ref(tstate.get_root());
                             return;
                         }
+                        cache_map.remove_node_ref(new_node_ptr, false);
                         new_root.add_successor(new_node_ptr, old_weight);
                     }
-                    if (i_state->get_axis_index() != 1) {
-                        // TODO then we delete the old edge at the end (fix cleanup)
-                    }
                 }
+                // clean up old tstate
+                tstate.get_root()->delete_edges();
+                cache_map.remove_node_ref(tstate.get_root());
                 // final reduction
                 if (new_root.get_successor_ref(0) == new_root.get_successor_ref(1)) {
                     const TDD_Node next_node = *(new_root.get_successor_ref(0)->get_target());

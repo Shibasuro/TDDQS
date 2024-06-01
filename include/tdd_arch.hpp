@@ -282,6 +282,9 @@ class TDD_Map {
     public:
         // for adding new nodes and edges to the maps, returns pointer to node or edge
         const TDD_Node *add_node(TDD_Node node) {
+            if (node.is_terminal()) {
+                return get_terminal_node();
+            }
             check_nodes();
             auto pr = node_map.emplace(node, 1);
             size_t dim = node.get_dimension();
