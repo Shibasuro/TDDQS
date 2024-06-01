@@ -1071,6 +1071,115 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
     return TDD(new_node_ptr, weight, shape);
 }
 
+// this is hardcoded specifically for the case of applying lambda to the right side of an MPS TDD
+// we can do this by copying all the nodes down to the bottom level, then multiplying by lambdas
+// and propagating the normalisation all the way back up
+// this means we can cleanup at the end as we fully replace the tdd
+// This still offers time saving over regular contraction for lambda application,
+// as we can keep lambda as just the diagonal values, eliminating conversion to TDD
+// and additionally we do not need to make any calls to add_tdds
+// This case is still slower than left lambda application though however
+// note we can assume the state is of shape (2,x1,x2), as the case where qubit is 0 is equivalent
+// to left lambda contraction, and we do not absorb from the right on the rightmost qubit
+// NOTE: this can also be extended to any last axis application
+// could possibly be extended to applying lambdas to arbitrary layers as well
+TDD apply_lambda_right(TDD &tdd, xarray<cd> &lambda_local, uint16_t axis = 0, bool cleanup = true) {
+    const TDD_Node* root = tdd.get_root();
+    uint16_t axis_index = root->get_axis_index();
+    std::vector<size_t> shape = tdd.get_shape();
+    cd in_weight = tdd.get_weight();
+    // if weight is 0, then node is just the terminal node with in_weight 0
+    if (in_weight == cd(0,0)) {
+        // in this case, the root is terminal with weight 0
+        // thus applying lambda would not do anything anyway
+        return TDD(cache_map.get_terminal_node(), 0, shape);
+    }
+    size_t dimension = shape[axis];
+    TDD_Node new_node(axis);
+    cd normalisation_weight = 0;
+    if (axis == 2 && axis_index != 2) {
+        normalisation_weight = lambda_local(0);
+    }
+    std::set<const TDD_Edge*> new_edge_set;
+    for (size_t i = 0; i < dimension; i++) {
+        if (axis == 2 && axis_index == 2) {
+            // then we are at the level we need to apply lambdas and we have existing edges
+            // to multiply up by lambda
+            const TDD_Edge* old_edge = root->get_successor_ref(i);
+            cd new_edge_weight = old_edge->get_weight() * lambda_local(i);
+            if (normalisation_weight != cd(0,0)) {
+                new_edge_weight = new_edge_weight / normalisation_weight;
+            }
+            else if (!is_approx_equal(new_edge_weight, cd(0,0))) {
+                normalisation_weight = lambda_local(i);
+                new_edge_weight = 1;
+            }
+            // this is always an edge to the terminal node
+            // TODO can remove the old edge here as part of finer grained removal
+            // cache_map.remove_edge_ref(old_edge);
+            new_edge_set.insert(new_node.add_successor(cache_map.get_terminal_node(), new_edge_weight));
+        }
+        else if (axis == 2) {
+            // otherwise axis is 2, but the TDD skips axis 2 (i.e. all the successors were the same)
+            // so we need to construct new edges to terminal nodes
+            cd new_edge_weight = lambda_local(i) / normalisation_weight;
+            new_edge_set.insert(new_node.add_successor(cache_map.get_terminal_node(), new_edge_weight));
+        }
+        else {
+            // otherwise we are on axis 0 or 1, so progress tdd as necessary and make recursive call
+            const TDD_Node* child = root;
+            cd child_weight = 1;
+            if (axis_index == axis) {
+                // progress tdd
+                const TDD_Edge* temp = root->get_successor_ref(i);
+                child = temp->get_target();
+                child_weight = temp->get_weight();
+            }
+            TDD old_child(child, child_weight, shape);
+            TDD new_child = apply_lambda_right(old_child, lambda_local, axis + 1, false);
+            const TDD_Node *new_child_root = new_child.get_root();
+            cd new_weight = new_child.get_weight();
+            // update normalisation weight if necessary
+            if (normalisation_weight != cd(0,0)) {
+                new_weight = new_weight / normalisation_weight;
+            }
+            else if (!is_approx_equal(new_weight, cd(0,0))) {
+                normalisation_weight = new_weight;
+                new_weight = 1;
+            }
+            cache_map.remove_node_ref(new_child_root, false);
+            new_edge_set.insert(new_node.add_successor(new_child_root, new_weight));
+        }    
+    }
+    // TODO cleanup causes crash
+    // TODO incorrect implementation
+    if (cleanup) {
+        // delete the old tdd towards end of top level call
+        // TODO make cleanup more efficient? - as you go along
+        // that would save having to do a second traversal, does not affect time complexity
+        tdd.cleanup();
+    }
+    // now do usual reduction and normalisation
+
+    // RR3 - need to check new node to see if all successors are the same and have the same weights
+    if (new_edge_set.size() == 1) {
+        // if all the successors are the same, then that means we do not need this node, instead
+        // direct the tdd to the successor node with the in weight
+        // that means the other successors need to be deleted as well (they are identical to the first anyway)
+        const TDD_Node next_node = *(new_node.get_successor_ref(0)->get_target());
+        // delete the successors
+        new_node.cleanup_duplicates();
+
+        const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
+
+        return TDD(new_node_ptr, in_weight * normalisation_weight, shape);
+    }
+
+    // otherwise, the new node is now reduced and we can add it to the map
+    const TDD_Node *new_node_ptr = cache_map.add_node(new_node);
+    return TDD(new_node_ptr, in_weight * normalisation_weight, shape);
+}
+
 // convert TDD to a tensor
 xarray<cd> convert_TDD_to_tensor(TDD tdd) {
     uint16_t axis_offset = tdd.get_axis_offset();

@@ -364,10 +364,16 @@ class MPS_Circuit : public TDD_Circuit {
         // WIP, TODO do proper cleanup
         void absorb_lambda(uint32_t qubit, bool left = true, bool mult = true) {
             xarray<cd> lambda_local;
-            if (left) {
-                lambda_local = lambda[qubit - 1];
+            if (left || qubit == 0) {
+                if (qubit == 0) {
+                    // absorbing from the right for qubit 0 is the same as left absorption
+                    lambda_local = lambda[0];
+                }
+                else {
+                    lambda_local = lambda[qubit - 1];
+                }
                 if (!mult) {
-                    lambda_local = 1.0 / lambda[qubit - 1];
+                    lambda_local = 1.0 / lambda_local;
                 }
                 // in this case, all we need to do is multiply all the weights and renormalise/reduce
                 TDD tstate = state[qubit];
@@ -491,11 +497,18 @@ class MPS_Circuit : public TDD_Circuit {
                 }
                 const TDD_Node* new_node_ptr = cache_map.add_node(new_root);
                 state[qubit] = TDD(new_node_ptr, new_in_weight * global_normalisation_weight, tstate.get_shape());
-                return;
             }
             else {
-                // otherwise absorbing lambda from the right
+                // otherwise absorbing lambda from the right, qubit != 0
                 lambda_local = lambda[qubit];
+                if (!mult) {
+                    lambda_local = 1.0 / lambda_local;
+                }
+                if (state[qubit].get_weight() == cd(0,0) || is_approx_equal(lambda_local(0)*lambda_local(0),cd(1,0))) {
+                    // do not need to do anything if its 0 or if lambda_local is just 1d identity
+                    return;
+                }
+                state[qubit] = apply_lambda_right(state[qubit], lambda_local);
             }
         }
 
@@ -583,20 +596,29 @@ class MPS_Circuit : public TDD_Circuit {
                     }
                     // absorb lambdas
                     auto t1 = std::chrono::high_resolution_clock::now();
-                    if (q1 > 0) {
-                        // xarray<cd> left = diag(lambda[q1 - 1]);
-                        // TDD lambda_left = convert_tensor_to_TDD(left);
-                        // state[q1] = contract_tdds(state[q1], lambda_left, {1}, {1});
-                        absorb_lambda(q1);
-                    }
-                    if (q2 < num_qubits - 1) {
-                        xarray<cd> right = diag(lambda[q2]);
-                        TDD lambda_right = convert_tensor_to_TDD(right);
-                        state[q2] = contract_tdds(state[q2], lambda_right, {2}, {0});
-                    }
+                    // old lambda absorption
+                    // if (q1 > 0) {
+                    //     xarray<cd> left = diag(lambda[q1 - 1]);
+                    //     TDD lambda_left = convert_tensor_to_TDD(left);
+                    //     state[q1] = contract_tdds(state[q1], lambda_left, {1}, {1});
+                    // }
+                    // if (q2 < num_qubits - 1) {
+                    //     xarray<cd> right = diag(lambda[q2]);
+                    //     TDD lambda_right = convert_tensor_to_TDD(right);
+                    //     state[q2] = contract_tdds(state[q2], lambda_right, {2}, {1});
+                    // }
                     // xarray<cd> bond = diag(lambda[q1]);
                     // TDD lambda_bond = convert_tensor_to_TDD(bond);
                     // state[q1] = contract_tdds(state[q1], lambda_bond, {q1_to_q2_bond_index}, {0});
+
+                    // new and improved lambda absorption
+                    if (q1 > 0) {
+                        absorb_lambda(q1);
+                    }
+                    if (q2 < num_qubits - 1) {
+                        // right absorption
+                        absorb_lambda(q2, false);
+                    }
                     absorb_lambda(q2);
                     auto t2 = std::chrono::high_resolution_clock::now();
                     std::chrono::duration<double, std::milli> ms_double = t2 - t1;

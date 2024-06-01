@@ -460,7 +460,7 @@ void correctness_test() {
     // carry out a few rounds of checks
     uint32_t num_rounds = 20;
     uint32_t max_gates = 50; // restrict circuit depth for this purpose to ensure feasible calculations
-    uint32_t num_qubits = 3;
+    uint32_t num_qubits = 10;
     uint32_t num_failures = 0;
     for (uint32_t i = 0; i < num_rounds; i++) {
         // initialises circuit with num_qubits qubits
@@ -626,7 +626,7 @@ int main()
     parsing_test();
     // tdd_conversion_test();
     // swap_axes_test();
-    manual_correctness_test();
+    // manual_correctness_test();
     // correctness_test();
     // print_max_memory_usage();
 
