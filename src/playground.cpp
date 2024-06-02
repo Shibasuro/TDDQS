@@ -358,10 +358,15 @@ void parsing_test() {
     // std::cout << "probability of qubit 0 being 0: " << total_prob << std::endl;
     // total_prob = circ.get_qubit_probability(0, 1);
     // std::cout << "probability of qubit 0 being 1: " << total_prob << std::endl;
+
+    // total_prob = circ.get_qubit_probability_qiskit_style(0, 0);
+    // std::cout << "qis probability of qubit 0 being 0: " << total_prob << std::endl;
+    // total_prob = circ.get_qubit_probability_qiskit_style(0, 1);
+    // std::cout << "qis probability of qubit 0 being 1: " << total_prob << std::endl;
     // circ.get_statevector();
     // std::cout << circ.get_statevector() << std::endl;
     // circ.print_mps_state();
-    // circ.cleanup();
+    circ.cleanup();
 
 
     std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
@@ -430,7 +435,8 @@ void manual_correctness_test() {
     auto qpp_state = qpp::transpose(q_engine.get_state());
     xarray<cd> tdd_state = circ.get_statevector();
     // these should be num_qubit statevectors, so just compare index by index?
-    uint32_t max_index = (uint32_t)pow(2, 6);
+    uint32_t num_qubits = 6;
+    uint32_t max_index = (uint32_t)pow(2, num_qubits);
     // convert tdd_state to vector
     tdd_state.reshape({max_index});
     uint32_t incorrect_val_count = 0;

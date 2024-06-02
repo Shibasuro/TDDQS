@@ -122,6 +122,8 @@ class TDD_Node {
         void cleanup() const;
 
         void cleanup_duplicates() const;
+
+        void duplicate() const;
         
         cd get_value(xarray<size_t> indices) const {
             if (is_terminal()) {
@@ -471,6 +473,14 @@ inline void TDD_Node::cleanup_duplicates() const {
     }
 }
 
+inline void TDD_Node::duplicate() const {
+    for (size_t i = 0; i < successors.size(); i++) {
+        const TDD_Node *next = get_successor_ref(i)->get_target();
+        cache_map.add_edge(*get_successor_ref(i));
+        next->duplicate();
+    }
+}
+
 class TDD {
     private: 
         const TDD_Node *root;
@@ -512,6 +522,41 @@ class TDD {
         
         void multiply_weight(cd multiplier) {
             in_weight *= multiplier;
+        }
+
+        void swap_successors(size_t index1, size_t index2) {
+            if (root->get_axis_index() > 0) {
+                // if successors are all the same, swapping does nothing
+                return;
+            }
+            TDD_Node new_node(0);
+            size_t dimension = root->get_dimension();
+            cd normalisation_weight = 0;
+            for (size_t i = 0; i < dimension; i++) {
+                size_t current_index = i;
+                // apply the swap
+                if (i == index1) {
+                    current_index = index2;
+                }
+                else if (i == index2) {
+                    current_index = index1;
+                }
+                const TDD_Edge *old_edge = root->get_successor_ref(current_index);
+                cd weight = old_edge->get_weight();
+                if (normalisation_weight != cd(0,0)) {
+                    weight = weight / normalisation_weight;
+                }
+                else {
+                    normalisation_weight = weight;
+                    weight = 1;
+                }
+                new_node.add_successor(old_edge->get_target(), weight);
+                cache_map.remove_edge_ref(old_edge);
+            }
+            // this will never affect reduction, may only affect normalisation
+            in_weight *= normalisation_weight;
+            cache_map.remove_node_ref(root);
+            root = cache_map.add_node(new_node);
         }
 
         // returns first nonzero index, or if none is found then out of bounds index
@@ -673,8 +718,8 @@ TDD convert_tensor_to_TDD(xarray<cd> &tensor, uint16_t axis = 0) {
 // so can save on memory by no longer adding to the set)
 // assumes all TDDs have the same index set and axis (i.e. same shape)
 // Addition is a shape preserving operation
-// TODO could tailor make a add_2_tdds to increase efficiency when only 2 tdds
 // worst case time complexity is O(tdds.size() * product of shape elements)
+// TODO investigate why add_tdds is so slow - may just be due to the overheads?
 TDD add_tdds(std::vector<TDD> &tdds, bool first = true) {
     std::set<const TDD_Node *> root_set;
     cd weight_sum = 0;
@@ -1071,6 +1116,121 @@ TDD contract_tdds(TDD &first, TDD &second, std::vector<uint16_t> first_axes, std
     return TDD(new_node_ptr, weight, shape);
 }
 
+TDD apply_lambda_left(TDD &tdd, xarray<cd> &lambda_local) {
+    cd new_in_weight = tdd.get_weight();
+    uint32_t first_dim = 2;
+    if (tdd.get_root()->get_axis_index() != 0) {
+        // then the 0 and 1 children are the same, this doesn't get changed by this operation
+        first_dim = 1;
+    }
+    TDD_Node new_root(0);
+    cd global_normalisation_weight = 0;
+    for (uint32_t i = 0; i < first_dim; i++) {
+        // need to get 0 and 1 children and treat separately
+        // unless first_dim is 1, i.e. 0-child == 1-child
+        const TDD_Node* i_state;
+        cd old_weight;
+        if (first_dim == 1) {
+            i_state = tdd.get_root();
+            old_weight = 1;
+        }
+        else {
+            i_state = tdd.get_root()->get_successor_ref(i)->get_target();
+            old_weight = tdd.get_root()->get_successor_ref(i)->get_weight();
+        }
+        if (old_weight == cd(0,0)) {
+            new_root.add_successor(cache_map.get_terminal_node(), cd(0,0));
+            continue;
+        }
+        TDD_Node new_i_child(1);
+        // need to do this for all items in state.get_shape()[1] as we are absorbing from left
+        // no need to change the first edge though
+        TDD_Node new_node(1);
+        cd normalisation_weight = 0;
+        if (i_state->get_axis_index() != 1) {
+            new_node.set_successors(i_state->get_successors());
+            normalisation_weight = lambda_local(0);
+        }
+        std::set<const TDD_Edge *> new_edge_set;
+        for (uint32_t j = 0; j < tdd.get_shape()[1]; j++) {
+            if (i_state->get_axis_index() == 1) {
+                const TDD_Edge* old_edge = i_state->get_successor_ref(j);
+                // we multiply on this axis for left contraction
+                cd new_edge_weight = old_edge->get_weight() * lambda_local(j);
+                if (normalisation_weight != cd(0,0)) {
+                    new_edge_weight = new_edge_weight / normalisation_weight;
+                }
+                else if (!is_approx_equal(new_edge_weight, cd(0,0))) {
+                    normalisation_weight = lambda_local(j);
+                    new_edge_weight = 1;
+                }
+                new_edge_set.insert(new_i_child.add_successor(old_edge->get_target(), new_edge_weight));
+                cache_map.remove_edge_ref(old_edge);
+            }
+            else {
+                // otherwise we skipped this axis, so need to make new node with weight from lambda
+                cd new_edge_weight = lambda_local(j) / normalisation_weight;
+                const TDD_Node* new_node_ptr = cache_map.add_node(new_node);
+                cache_map.remove_node_ref(new_node_ptr, false);
+                new_edge_set.insert(new_i_child.add_successor(new_node_ptr, new_edge_weight));
+            }
+        }
+        if (global_normalisation_weight != cd(0,0)) {
+            normalisation_weight = normalisation_weight / global_normalisation_weight;
+        }
+        else {
+            global_normalisation_weight = normalisation_weight;
+            normalisation_weight = 1;
+        }
+        old_weight *= normalisation_weight;
+        if (i_state->get_axis_index() != 1) {
+            i_state->cleanup();
+        }
+        // delete the old i_state
+        cache_map.remove_node_ref(i_state);
+        if (new_edge_set.size() == 1) {
+            // if all the successors are the same, then that means we do not need this node, instead
+            // direct the tdd to the successor node with the in weight
+            // that means the other successors need to be deleted as well (they are identical to the first anyway)
+            const TDD_Node next_node = *(new_i_child.get_successor_ref(0)->get_target());
+            // delete the successors
+            new_i_child.cleanup_duplicates();
+
+            const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
+            // then new_node_ptr is the new_node to pass up to the parent
+            if (first_dim == 1) {
+                cache_map.remove_node_ref(tdd.get_root());
+                return TDD(new_node_ptr, new_in_weight * global_normalisation_weight, tdd.get_shape());
+            }
+            cache_map.remove_node_ref(new_node_ptr, false);
+            new_root.add_successor(new_node_ptr, old_weight);
+        }
+        else {
+            const TDD_Node *new_node_ptr = cache_map.add_node(new_i_child);
+            if (first_dim == 1) {
+                cache_map.remove_node_ref(tdd.get_root());
+                return TDD(new_node_ptr, new_in_weight * global_normalisation_weight, tdd.get_shape());
+            }
+            cache_map.remove_node_ref(new_node_ptr, false);
+            new_root.add_successor(new_node_ptr, old_weight);
+        }
+    }
+    // clean up old tdd
+    tdd.get_root()->delete_edges();
+    cache_map.remove_node_ref(tdd.get_root());
+    // final reduction
+    if (new_root.get_successor_ref(0) == new_root.get_successor_ref(1)) {
+        const TDD_Node next_node = *(new_root.get_successor_ref(0)->get_target());
+        // delete the successors
+        new_root.cleanup_duplicates();
+
+        const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
+        return TDD(new_node_ptr, new_in_weight * global_normalisation_weight, tdd.get_shape());
+    }
+    const TDD_Node* new_node_ptr = cache_map.add_node(new_root);
+    return TDD(new_node_ptr, new_in_weight * global_normalisation_weight, tdd.get_shape());
+}
+
 // this is hardcoded specifically for the case of applying lambda to the right side of an MPS TDD
 // we can do this by copying all the nodes down to the bottom level, then multiplying by lambdas
 // and propagating the normalisation all the way back up
@@ -1151,8 +1311,6 @@ TDD apply_lambda_right(TDD &tdd, xarray<cd> &lambda_local, uint16_t axis = 0, bo
             new_edge_set.insert(new_node.add_successor(new_child_root, new_weight));
         }    
     }
-    // TODO cleanup causes crash
-    // TODO incorrect implementation
     if (cleanup) {
         // delete the old tdd towards end of top level call
         // TODO make cleanup more efficient? - as you go along
@@ -1181,7 +1339,7 @@ TDD apply_lambda_right(TDD &tdd, xarray<cd> &lambda_local, uint16_t axis = 0, bo
 }
 
 // convert TDD to a tensor
-xarray<cd> convert_TDD_to_tensor(TDD tdd) {
+xarray<cd> convert_TDD_to_tensor(TDD tdd, bool cleanup = true) {
     uint16_t axis_offset = tdd.get_axis_offset();
     xarray<cd> tensor = zeros<cd>(tdd.get_shape());
     const TDD_Node* root = tdd.get_root();
@@ -1245,7 +1403,9 @@ xarray<cd> convert_TDD_to_tensor(TDD tdd) {
     }
 
     // clean up the tdd, could this be more efficient by deleting as we go along above?
-    tdd.cleanup();
+    if (cleanup) {
+        tdd.cleanup();
+    }
     return tensor;
 }
 
@@ -1255,7 +1415,359 @@ TDD kronecker_conjugate(TDD tdd) {
     return contract_tdds(tdd, tdd2, {}, {}, 0, false, true);
 }
 
-// BELOW IS NOT ACTUALLY USED ANYWHERE, however it would be necessary for doing SVD directly on 
+// TODO for these multiply functions, look into adding 0 shortcircuiting?
+
+// contract two vectors together efficiently (should be same length vectors)
+// axis input here is whatever the axis index would be in the main computation
+TDD multiply_vectors(TDD &v1, TDD &v2, uint16_t axis1 = 0, uint16_t axis2 = 0) {
+    cd sum = 0;
+    size_t dim = v1.get_shape()[0];
+    for (size_t i = 0; i < dim; i++) {
+        cd w1 = v1.get_weight();
+        cd w2 = v2.get_weight();
+        if (v1.get_root()->get_axis_index() == axis1) {
+            // then its not already terminal, so can index it
+            w1 *= v1.get_root()->get_successor_ref(i)->get_weight();
+        }
+        if (v2.get_root()->get_axis_index() == axis2) {
+            // then its not already terminal, so can index it
+            w2 *= v2.get_root()->get_successor_ref(i)->get_weight();
+        }
+        sum += w1 * w2;
+    }
+    return TDD(cache_map.get_terminal_node(), sum, {});
+}
+
+// contract vector with matrix
+TDD multiply_v_m(TDD &v, TDD &m, uint16_t axis1 = 0, uint16_t axis2 = 0) {
+    std::vector<TDD> tdds_to_add;
+    size_t dim = v.get_shape()[0];
+    for (size_t i = 0; i < dim; i++) {
+        cd w1 = v.get_weight();
+        if (v.get_root()->get_axis_index() == axis1) {
+            // then its not already terminal, so can index it
+            w1 *= v.get_root()->get_successor_ref(i)->get_weight();
+        }
+        const TDD_Node* m2 = m.get_root();
+        cd w2 = m.get_weight();
+        if (m2->get_axis_index() == axis2) {
+            // then can index it
+            const TDD_Edge* edge = m2->get_successor_ref(i);
+            m2 = edge->get_target();
+            w2 *= edge->get_weight();
+        }
+        // TODO find faster way than simply duplicating m2 and overwriting the axis_index
+        size_t dim2 = m.get_shape()[1];
+        // if we call from multiply_matrices then we want axis_index = 2
+        // if not, then axis_index = 1
+        // i.e. we want the new axis_index to be = axis1
+        if (m2->is_terminal()) {
+            tdds_to_add.push_back(TDD(m2, w1 * w2, {dim2}));
+        }
+        else {
+            TDD_Node m2_prime(axis1);
+            m2_prime.set_successors(m2->get_successors());
+            const TDD_Node* m2pp = cache_map.add_node(m2_prime);
+            for (size_t j = 0; j < dim2; j++) {
+                cache_map.add_edge(*(m2_prime.get_successor_ref(j)));
+            }
+            tdds_to_add.push_back(TDD(m2pp, w1 * w2, {dim2}));
+        }
+    }
+    auto t1 = std::chrono::high_resolution_clock::now();
+    TDD temp = add_tdds(tdds_to_add, false);
+    auto t2 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+    cache_map.inc_time(ms_double.count());
+    return temp;
+    // return add_tdds(tdds_to_add, false);
+}
+
+// for this we just require m1 is a matrix (m2 can be matrix or vector?)
+// for contracting matrix-vector or matrix-matrix
+TDD multiply_matrices(TDD &m1, TDD &m2, uint16_t axis = 0) {
+    TDD_Node new_node(axis);
+    cd in_weight = m1.get_weight();
+    size_t dim = m1.get_shape()[0];
+    cd normalisation_weight = 0;
+    std::set<const TDD_Edge*> new_edge_set;
+    std::vector<size_t> f_shape = m1.get_shape();
+    // construct the shape
+    std::vector<size_t> shape{dim};
+    for (size_t i = 0; i < dim; i++) {
+        const TDD_Node *m1_child = m1.get_root();
+        cd m1_child_weight = 1;
+        if (m1_child->get_axis_index() == axis) {
+            // then can index m1_child
+            const TDD_Edge *edge = m1_child->get_successor_ref(i);
+            m1_child = edge->get_target();
+            m1_child_weight *= edge->get_weight();
+        }
+        std::vector<size_t> m1_child_shape(f_shape.begin() + 1, f_shape.end());
+        TDD m1_vector(m1_child, m1_child_weight, m1_child_shape);
+        TDD new_child;
+        if (m2.get_shape().size() == 2) {
+            // m2 is a matrix, then we can call multiply_v_m
+            new_child = multiply_v_m(m1_vector, m2, axis + 1, axis);
+        }
+        else {
+            // m2 is a vector, we can call multiply_vectors
+            new_child = multiply_vectors(m1_vector, m2, axis + 1, axis);
+        }
+        // update normalisation weight and add new edge
+
+        const TDD_Node *new_child_root = new_child.get_root();
+        cd new_weight = new_child.get_weight();
+        // push back the child shape onto the shape
+        if (i == 0) {
+            std::vector<size_t> child_shape = new_child.get_shape();
+            for (uint32_t j = 0; j < child_shape.size(); j++) {
+                shape.push_back(child_shape[j]);
+            }
+        }
+        // update normalisation weight if necessary
+        if (normalisation_weight != cd(0,0)) {
+            new_weight = new_weight / normalisation_weight;
+        }
+        else if (!is_approx_equal(new_weight, cd(0,0))) {
+            normalisation_weight = new_weight;
+            new_weight = 1;
+        }
+        cache_map.remove_node_ref(new_child_root, false);
+        new_edge_set.insert(new_node.add_successor(new_child_root, new_weight));
+    }
+    // reduce and normalise
+    in_weight *= normalisation_weight;
+    // RR2 - see convert to tdd for more info
+    if (in_weight == cd(0,0)) {
+        new_node.cleanup();
+        return TDD(cache_map.get_terminal_node(), 0, shape);
+    }
+    // RR3 - need to check new node to see if all successors are the same and have the same weights
+    if (new_edge_set.size() == 1) {
+        // if all the successors are the same, then that means we do not need this node, instead
+        // direct the tdd to the successor node with the in weight
+        // that means the other successors need to be deleted as well (they are identical to the first anyway)
+        const TDD_Node next_node = *(new_node.get_successor_ref(0)->get_target());
+        // delete the successors
+        new_node.cleanup_duplicates();
+
+        const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
+
+        return TDD(new_node_ptr, in_weight, shape);
+    }
+
+    // otherwise, the new node is now reduced and we can add it to the map
+    const TDD_Node *new_node_ptr = cache_map.add_node(new_node);
+    return TDD(new_node_ptr, in_weight, shape);
+}
+
+// specialised algorithm for contracting two adjacent MPS TDDs
+// takes mab, nbc -> mnac or mnc (c can still be 1 though)
+TDD contract_MPS_tdds(TDD &mps1, TDD &mps2, bool cleanup = true) {
+    TDD_Node new_node(0);
+    cd in_weight = 1;
+    cd normalisation_weight = 0;
+    std::set<const TDD_Edge*> new_edge_set;
+    std::vector<size_t> shape{4};
+    std::vector<size_t> fshape = mps1.get_shape();
+    std::vector<size_t> sshape = mps2.get_shape();
+    // TODO could make use of equality of different cases to skip recomputing the same matrix products
+    for (uint32_t i = 0; i < 2; i++) {
+        const TDD_Node *root1 = mps1.get_root();
+        cd weight1 = mps1.get_weight();
+        std::vector<size_t> shape1(fshape.begin() + 1, fshape.end());
+        if (root1->get_axis_index() == 0) {
+            // then we can index it 
+            const TDD_Edge *edge = root1->get_successor_ref(i);
+            root1 = edge->get_target();
+            weight1 *= edge->get_weight();
+        }
+        TDD child1 = TDD(root1, weight1, shape1);
+        for (uint32_t j = 0; j < 2; j++) {
+            const TDD_Node *root2 = mps2.get_root();
+            cd weight2 = mps2.get_weight();
+            std::vector<size_t> shape2(sshape.begin() + 1, sshape.end());
+            if (root2->get_axis_index() == 0) {
+                // then we can index it 
+                const TDD_Edge *edge = root2->get_successor_ref(j);
+                root2 = edge->get_target();
+                weight2 *= edge->get_weight();
+            }
+            TDD child2 = TDD(root2, weight2, shape2);
+            // then we want to add a child to the new_root for each mps1[i] * mps2[j]
+            TDD new_child;
+            // either vector-matrix, matrix-matrix, or matrix-vector (or vector-vector if only 2 qubits total)
+            if (shape1.size() == 1 && shape2.size() == 1) {
+                // vector-vector - outputs scalar
+                new_child = multiply_vectors(child1, child2, 1, 1);
+            }
+            else if (shape1.size() == 1 && shape2.size() == 2) {
+                // vector-matrix - outputs vector
+                new_child = multiply_v_m(child1, child2, 1, 1);
+            }
+            else {
+                // matrix-vector or matrix-matrix
+                new_child = multiply_matrices(child1, child2, 1);
+            }
+            // update normalisation weight and add new edge
+            const TDD_Node *new_child_root = new_child.get_root();
+            cd new_weight = new_child.get_weight();
+            // push back the child shape onto the shape
+            if (i == 0 && j == 0) {
+                std::vector<size_t> child_shape = new_child.get_shape();
+                for (uint32_t j = 0; j < child_shape.size(); j++) {
+                    shape.push_back(child_shape[j]);
+                }
+            }
+            // update normalisation weight if necessary
+            if (normalisation_weight != cd(0,0)) {
+                new_weight = new_weight / normalisation_weight;
+            }
+            else if (!is_approx_equal(new_weight, cd(0,0))) {
+                normalisation_weight = new_weight;
+                new_weight = 1;
+            }
+            cache_map.remove_node_ref(new_child_root, false);
+            new_edge_set.insert(new_node.add_successor(new_child_root, new_weight));    
+        }
+    }
+    if (cleanup) {
+        mps1.cleanup();
+        mps2.cleanup();
+    }
+    // apply reduction and normalisation
+    in_weight *= normalisation_weight;
+    // RR2 - see convert to tdd for more info
+    if (in_weight == cd(0,0)) {
+        new_node.cleanup();
+        return TDD(cache_map.get_terminal_node(), 0, shape);
+    }
+    // RR3 - need to check new node to see if all successors are the same and have the same weights
+    if (new_edge_set.size() == 1) {
+        // if all the successors are the same, then that means we do not need this node, instead
+        // direct the tdd to the successor node with the in weight
+        // that means the other successors need to be deleted as well (they are identical to the first anyway)
+        const TDD_Node next_node = *(new_node.get_successor_ref(0)->get_target());
+        // delete the successors
+        new_node.cleanup_duplicates();
+
+        const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
+
+        return TDD(new_node_ptr, in_weight, shape);
+    }
+
+    // otherwise, the new node is now reduced and we can add it to the map
+    const TDD_Node *new_node_ptr = cache_map.add_node(new_node);
+    return TDD(new_node_ptr, in_weight, shape);
+}
+
+// efficiently apply dim x dim gate to a tdd which is dim x anything
+TDD apply_gate(xarray<cd> &gate, TDD &tdd, uint32_t dim) {
+    TDD_Node new_node(0);
+    cd normalisation_weight = 0;
+    cd in_weight = tdd.get_weight();
+    std::vector<size_t> shape = tdd.get_shape();
+    std::set<const TDD_Edge *> new_edge_set;
+    // we are generating 2 or 4 children at this stage
+    for (uint32_t i = 0; i < dim; i++) {
+        std::vector<TDD> tdds_to_add;
+        // we are indexing the tdd state here to sum the matrices/vectors
+        for (uint32_t j = 0; j < dim; j++) {
+            const TDD_Node *summand = tdd.get_root();
+            cd s_weight = 1;
+            if (summand->get_axis_index() == 0) {
+                // then we can index it 
+                const TDD_Edge *edge = summand->get_successor_ref(j);
+                summand = edge->get_target();
+                s_weight *= edge->get_weight();
+            }
+            // shape doesnt matter going into add_tdds as it is shape preserving, but do it just in case
+            // we change add_tdds in the future
+            // duplicate summand in the cache map to ensure we don't remove the original
+            summand->duplicate();
+            cache_map.add_node(*summand);
+            std::vector s_shape(shape.begin() + 1, shape.end());
+            tdds_to_add.push_back(TDD(summand, gate(i,j) * s_weight, s_shape));
+        }
+        // TODO problem as add_tdds may end up deleting some of the items in tdds_to_add
+        // need a way for add_tdds to not delete any of the original nodes but stay cleaned up?
+        // otherwise need to duplicate the summands
+        auto t1 = std::chrono::high_resolution_clock::now();
+        TDD new_child = add_tdds(tdds_to_add, false);
+        auto t2 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+        cache_map.inc_time(ms_double.count());
+
+        const TDD_Node *new_child_root = new_child.get_root();
+        cd new_weight = new_child.get_weight();
+
+        // update normalisation weight if necessary
+        if (normalisation_weight != cd(0,0)) {
+            new_weight = new_weight / normalisation_weight;
+        }
+        else if (!is_approx_equal(new_weight, cd(0,0))) {
+            normalisation_weight = new_weight;
+            new_weight = 1;
+        }
+        cache_map.remove_node_ref(new_child_root, false);
+        new_edge_set.insert(new_node.add_successor(new_child_root, new_weight));
+
+    }
+    tdd.cleanup();
+    // apply reduction and normalisation
+    in_weight *= normalisation_weight;
+    // RR2 - see convert to tdd for more info
+    if (in_weight == cd(0,0)) {
+        new_node.cleanup();
+        return TDD(cache_map.get_terminal_node(), 0, shape);
+    }
+    // RR3 - need to check new node to see if all successors are the same and have the same weights
+    if (new_edge_set.size() == 1) {
+        // if all the successors are the same, then that means we do not need this node, instead
+        // direct the tdd to the successor node with the in weight
+        // that means the other successors need to be deleted as well (they are identical to the first anyway)
+        const TDD_Node next_node = *(new_node.get_successor_ref(0)->get_target());
+        // delete the successors
+        new_node.cleanup_duplicates();
+
+        const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
+
+        return TDD(new_node_ptr, in_weight, shape);
+    }
+
+    // otherwise, the new node is now reduced and we can add it to the map
+    const TDD_Node *new_node_ptr = cache_map.add_node(new_node);
+    return TDD(new_node_ptr, in_weight, shape);
+}
+
+// efficient algorithm for applying a two qubit gate (4x4 matrix)
+// takes 4,4 and 4,xi1,xi2 -> 4,xi1,xi2
+// TODO add swap functionality here and move gate processing to here from apply_instruction
+TDD apply_two_qubit_gate(xarray<cd> &gate, TDD &tdd) {
+    // TODO get more efficient way of checking gate equality
+    // perhaps gate numbers for example
+    // TODO add hardcoded gates here too
+    // if ( it is a cnot gate ) {
+    //     // then we just have to swap 10 and 11
+    //     tdd.swap_successors(2,3);
+    //     return tdd;
+    // }
+    // else if (it is a swap gate) {
+    //     // then we swap 10 and 01
+    //     tdd.swap_successors(1, 2);
+    //     return tdd;
+    // }
+    return apply_gate(gate, tdd, 4);
+}
+
+// efficiently apply single qubit gate
+// 2,2 and 2,xi1,xi2 -> 2,xi1,xi2
+TDD apply_single_qubit_gate(xarray<cd> &gate, TDD &tdd) {
+    // TODO add hardcoded gates here too
+    return apply_gate(gate, tdd, 2);
+}
+// BELOW IS NOT ACTUALLY USED ANYWHERE, however it could be necessary for doing SVD directly on 
 // TDD operation
 // Swapping axes is a fairly efficient operation, but reshape would be less efficient than
 // directly reshaping a tensor thus it seems it is not viable to do the direct SVD on a TDD

@@ -279,87 +279,7 @@ class MPS_Circuit : public TDD_Circuit {
             generator.seed(time(NULL));
         }
 
-        // TODO IF REBUILDING CODE, DO IT WITHOUT THE HASHMAP, WILL BE MUCH SIMPLER
-
-        // This requires 2 additions, each addition has time complexity 
-        // based on the size of the target state
-        // e.g. if target is (2,x1,x2), each addition is O(x1 * x2)
-        // so overall complexity is O(x1 * x2)
-        void apply_single_qubit_gate(uint32_t target, Gate g) {
-            // TODO implement logic for hardcoded gates (e.g. X, Y, Z, diagonal matrices etc)
-
-            // TODO this causes crashes right now
-
-            // General gate case
-            xarray<cd> gate = g.get_gate();
-            // gate_TDD is a 2x2 matrix
-            // do I even need to use get_child_TDD here?
-            // can just access the successor directly
-
-            const TDD_Edge* child0 = state[target].get_root()->get_successor_ref(0);
-            const TDD_Edge* child1 = state[target].get_root()->get_successor_ref(1);
-            // TODO add optimisation here if child0 == child1
-            // as in this case we don't need add_tdds, can just do gate(0,0) + gate(0,1) etc
-
-            TDD_Node new_root(0);
-            cd new_weight = cd(1,0);
-            cd normalisation_weight = cd(0,0);
-            std::vector<size_t> shape = state[target].get_shape();
-            // T' (0,a,b) = G (0,0) * T(0,a,b) + G (0,1) * T(1,a,b)
-            // no need for shape input as it won't change
-            TDD s1(child0->get_target(), gate(0,0) * child0->get_weight());
-            TDD s2(child1->get_target(), gate(0,1) * child1->get_weight());
-            
-            std::vector<TDD> tdds1 = {s1, s2};
-            TDD new_0_successor = add_tdds(tdds1, false);
-            cd new_0_weight = new_0_successor.get_weight();
-            if (!is_approx_equal(new_0_weight, cd(0,0))) {
-                normalisation_weight = new_0_weight;
-                new_0_weight = 1;
-            }
-            cache_map.remove_node_ref(new_0_successor.get_root(), false);
-            const TDD_Edge* new_0_edge = new_root.add_successor(new_0_successor.get_root(), new_0_weight);
-
-            // T' (1,a,b) = G (1,0) * T(0,a,b) + G (1,1) * T(1,a,b)
-            TDD s3(child0->get_target(), gate(1,0) * child0->get_weight());
-            TDD s4(child1->get_target(), gate(1,1) * child1->get_weight());
-
-            std::vector<TDD> tdds2 = {s3, s4};
-            TDD new_1_successor = add_tdds(tdds2, false);
-            cd new_1_weight = new_1_successor.get_weight();
-            if (normalisation_weight != cd(0,0)) {
-                new_1_weight = new_1_weight / normalisation_weight;
-            }
-            else if (!is_approx_equal(new_1_weight, cd(0,0))) {
-                normalisation_weight = new_1_weight;
-                new_1_weight = 1;
-            }
-            cache_map.remove_node_ref(new_1_successor.get_root(), false);
-            const TDD_Edge* new_1_edge = new_root.add_successor(new_1_successor.get_root(), new_1_successor.get_weight());
-            // clean up the old TDD pieces
-            state[target].cleanup();
-            // reduce and propagate normalisation
-            new_weight *= normalisation_weight;
-            //RR2
-            if (new_weight == cd(0,0)) {
-                new_root.cleanup();
-                state[target] = TDD(cache_map.get_terminal_node(), 0, shape);
-                return;
-            }
-            //RR3
-            if (new_0_edge == new_1_edge) {
-                const TDD_Node next_node = *(new_root.get_successor_ref(0)->get_target());
-                // delete the successors
-                new_root.cleanup_duplicates();
-                const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
-
-                state[target] = TDD(new_node_ptr, new_weight, shape);
-                return;
-            }
-
-            const TDD_Node* new_node_ptr = cache_map.add_node(new_root);
-            state[target] = TDD(new_node_ptr, new_weight, shape);
-        }
+        // TODO IF REBUILDING CODE, MAY BE WORTH DOING WITHOUT EDGES MAP (just keep node map)
 
         // WIP, TODO do proper cleanup
         void absorb_lambda(uint32_t qubit, bool left = true, bool mult = true) {
@@ -375,128 +295,12 @@ class MPS_Circuit : public TDD_Circuit {
                 if (!mult) {
                     lambda_local = 1.0 / lambda_local;
                 }
-                // in this case, all we need to do is multiply all the weights and renormalise/reduce
-                TDD tstate = state[qubit];
-                // prepare new_in_weight for propagation to the top
-                cd new_in_weight = tstate.get_weight();
-                if (new_in_weight == cd(0,0) || is_approx_equal(lambda_local(0)*lambda_local(0),cd(1,0))) {
+                if (state[qubit].get_weight() == cd(0,0) || is_approx_equal(lambda_local(0)*lambda_local(0),cd(1,0))) {
                     // do not need to do anything if its 0 or if lambda_local is just 1d identity
                     return;
                 }
-                uint32_t first_dim = 2;
-                if (tstate.get_root()->get_axis_index() != 0) {
-                    // then the 0 and 1 children are the same, this doesn't get changed by this operation
-                    first_dim = 1;
-                }
-                TDD_Node new_root(0);
-                cd global_normalisation_weight = 0;
-                for (uint32_t i = 0; i < first_dim; i++) {
-                    // need to get 0 and 1 children and treat separately
-                    // unless first_dim is 1, i.e. 0-child == 1-child
-                    const TDD_Node* i_state;
-                    cd old_weight;
-                    if (first_dim == 1) {
-                        i_state = tstate.get_root();
-                        old_weight = 1;
-                    }
-                    else {
-                        i_state = tstate.get_root()->get_successor_ref(i)->get_target();
-                        old_weight = tstate.get_root()->get_successor_ref(i)->get_weight();
-                    }
-                    if (old_weight == cd(0,0)) {
-                        new_root.add_successor(cache_map.get_terminal_node(), cd(0,0));
-                        continue;
-                    }
-                    TDD_Node new_i_child(1);
-                    // need to do this for all items in state.get_shape()[1] as we are absorbing from left
-                    // no need to change the first edge though
-                    TDD_Node new_node(1);
-                    cd normalisation_weight = 0;
-                    if (i_state->get_axis_index() != 1) {
-                        new_node.set_successors(i_state->get_successors());
-                        normalisation_weight = lambda_local(0);
-                    }
-                    std::set<const TDD_Edge *> new_edge_set;
-                    for (uint32_t j = 0; j < tstate.get_shape()[1]; j++) {
-                        if (i_state->get_axis_index() == 1) {
-                            const TDD_Edge* old_edge = i_state->get_successor_ref(j);
-                            // we multiply on this axis for left contraction
-                            cd new_edge_weight = old_edge->get_weight() * lambda_local(j);
-                            if (normalisation_weight != cd(0,0)) {
-                                new_edge_weight = new_edge_weight / normalisation_weight;
-                            }
-                            else if (!is_approx_equal(new_edge_weight, cd(0,0))) {
-                                normalisation_weight = lambda_local(j);
-                                new_edge_weight = 1;
-                            }
-                            new_edge_set.insert(new_i_child.add_successor(old_edge->get_target(), new_edge_weight));
-                            cache_map.remove_edge_ref(old_edge);
-                        }
-                        else {
-                            // otherwise we skipped this axis, so need to make new node with weight from lambda
-                            cd new_edge_weight = lambda_local(j) / normalisation_weight;
-                            const TDD_Node* new_node_ptr = cache_map.add_node(new_node);
-                            cache_map.remove_node_ref(new_node_ptr, false);
-                            new_edge_set.insert(new_i_child.add_successor(new_node_ptr, new_edge_weight));
-                        }
-                    }
-                    if (global_normalisation_weight != cd(0,0)) {
-                        normalisation_weight = normalisation_weight / global_normalisation_weight;
-                    }
-                    else {
-                        global_normalisation_weight = normalisation_weight;
-                        normalisation_weight = 1;
-                    }
-                    old_weight *= normalisation_weight;
-                    if (i_state->get_axis_index() != 1) {
-                        i_state->cleanup();
-                    }
-                    // delete the old i_state
-                    cache_map.remove_node_ref(i_state);
-                    if (new_edge_set.size() == 1) {
-                        // if all the successors are the same, then that means we do not need this node, instead
-                        // direct the tdd to the successor node with the in weight
-                        // that means the other successors need to be deleted as well (they are identical to the first anyway)
-                        const TDD_Node next_node = *(new_i_child.get_successor_ref(0)->get_target());
-                        // delete the successors
-                        new_i_child.cleanup_duplicates();
-
-                        const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
-                        // then new_node_ptr is the new_node to pass up to the parent
-                        if (first_dim == 1) {
-                            state[qubit] = TDD(new_node_ptr, new_in_weight * global_normalisation_weight, tstate.get_shape());
-                            cache_map.remove_node_ref(tstate.get_root());
-                            return;
-                        }
-                        cache_map.remove_node_ref(new_node_ptr, false);
-                        new_root.add_successor(new_node_ptr, old_weight);
-                    }
-                    else {
-                        const TDD_Node *new_node_ptr = cache_map.add_node(new_i_child);
-                        if (first_dim == 1) {
-                            state[qubit] = TDD(new_node_ptr, new_in_weight * global_normalisation_weight, tstate.get_shape());
-                            cache_map.remove_node_ref(tstate.get_root());
-                            return;
-                        }
-                        cache_map.remove_node_ref(new_node_ptr, false);
-                        new_root.add_successor(new_node_ptr, old_weight);
-                    }
-                }
-                // clean up old tstate
-                tstate.get_root()->delete_edges();
-                cache_map.remove_node_ref(tstate.get_root());
-                // final reduction
-                if (new_root.get_successor_ref(0) == new_root.get_successor_ref(1)) {
-                    const TDD_Node next_node = *(new_root.get_successor_ref(0)->get_target());
-                    // delete the successors
-                    new_root.cleanup_duplicates();
-
-                    const TDD_Node *new_node_ptr = cache_map.add_node(next_node);
-                    state[qubit] = TDD(new_node_ptr, new_in_weight * global_normalisation_weight, tstate.get_shape());
-                    return;
-                }
-                const TDD_Node* new_node_ptr = cache_map.add_node(new_root);
-                state[qubit] = TDD(new_node_ptr, new_in_weight * global_normalisation_weight, tstate.get_shape());
+                
+                state[qubit] = apply_lambda_left(state[qubit], lambda_local);
             }
             else {
                 // otherwise absorbing lambda from the right, qubit != 0
@@ -524,11 +328,15 @@ class MPS_Circuit : public TDD_Circuit {
                     // Old Inefficient Implementation
                     // then it is single qubit gate, so this is same as original case, just contract
                     xarray<cd> gate = instr.get_gate().get_gate();
-                    TDD gate_TDD = convert_tensor_to_TDD(gate);
                     uint32_t target = instr.get_q1();
 
                     // only need to update the qubit the gate is being applied to
-                    state[target] = contract_tdds(gate_TDD, state[target], {1}, {0});
+
+                    // old version
+                    // TDD gate_TDD = convert_tensor_to_TDD(gate);
+                    // state[target] = contract_tdds(gate_TDD, state[target], {1}, {0});
+                    // more efficient
+                    state[target] = apply_single_qubit_gate(gate, state[target]);
                 }
                 else {
                     // otherwise its a two qubit gate
@@ -540,6 +348,7 @@ class MPS_Circuit : public TDD_Circuit {
                     uint32_t q2 = instr.get_q2();
                     // make sure we always use the lower qubit number q1, and adjust the gate
                     // accordingly to make sure gate is still applied correctly?
+                    // TODO defer changes to the gate to the apply_two_qubit_gate
                     if (q2 < q1) {
                         uint32_t temp = q2;
                         q2 = q1;
@@ -549,7 +358,9 @@ class MPS_Circuit : public TDD_Circuit {
                         gate = swapaxes(gate, {2}, {3});
                         gate = swapaxes(gate, {0}, {1});
                     }
-                    TDD gate_TDD = convert_tensor_to_TDD(gate);
+                    // TODO Temporary convert back to 4x4 matrix for efficiency testing
+                    gate.reshape({4,4});
+                    // TDD gate_TDD = convert_tensor_to_TDD(gate);
 
                     // now need to contract the two relevant MPS states state[q1] and state[q2]
                     // also contracting them with the gate itself
@@ -567,7 +378,6 @@ class MPS_Circuit : public TDD_Circuit {
                     // index will be either 1 or 2 as it is MPS, each is either {2,1} or {2,1,1}
                     uint16_t q1_to_q2_bond_index;
                     // q2 will always use bond index one in this case (as it is going left)
-                    uint16_t q2_to_q1_bond_index = 1;
                     if (q1 == 0) {
                         q1_to_q2_bond_index = 1;
                     }
@@ -595,7 +405,7 @@ class MPS_Circuit : public TDD_Circuit {
                         old_chi2 = shape2[2];
                     }
                     // absorb lambdas
-                    auto t1 = std::chrono::high_resolution_clock::now();
+                    // auto t1 = std::chrono::high_resolution_clock::now();
                     // old lambda absorption
                     // if (q1 > 0) {
                     //     xarray<cd> left = diag(lambda[q1 - 1]);
@@ -620,33 +430,45 @@ class MPS_Circuit : public TDD_Circuit {
                         absorb_lambda(q2, false);
                     }
                     absorb_lambda(q2);
-                    auto t2 = std::chrono::high_resolution_clock::now();
-                    std::chrono::duration<double, std::milli> ms_double = t2 - t1;
-                    tensor_space_time += ms_double.count();
+                    // auto t2 = std::chrono::high_resolution_clock::now();
+                    // std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+                    // tensor_space_time += ms_double.count();
 
                     // TODO? More efficient method might be to support reshaping of TDDs - not clear how to achieve this
                     // Contract the two parts of the MPS state
                     // CAN these two contraction cases be made more efficient?
-                    TDD intermediate = contract_tdds(state[q1], state[q2], {q1_to_q2_bond_index}, {q2_to_q1_bond_index});
-                    // mab, nbc -> manc
-                    // or have mb, nbc -> mnc
+                    // auto t1 = std::chrono::high_resolution_clock::now();
+                    // inefficient old setup
+                    // TDD intermediate = contract_tdds(state[q1], state[q2], {q1_to_q2_bond_index}, {q2_to_q1_bond_index});
+                    // // mab, nbc -> manc
+                    // // or have mb, nbc -> mnc
 
-                    // Contract intermediate with gate (ijmn) (important thing is to contract over m and n)
-                    // gate contraction index is the same as the q1_to_q2_bond_index
-                    TDD theta = contract_tdds(intermediate, gate_TDD, {0, q1_to_q2_bond_index}, {2, 3});
+                    // // Contract intermediate with gate (ijmn) (important thing is to contract over m and n)
+                    // // gate contraction index is the same as the q1_to_q2_bond_index
+                    // TDD theta = contract_tdds(intermediate, gate_TDD, {0, q1_to_q2_bond_index}, {2, 3});
                     // manc, ijmn -> ijac
                     // mnc, ijmn -> ijc
                     // effectively want final output to be iajc or i(1)jc
                     // so we need to do reshapes/swapaxes
 
+                    // new, more efficient setup
+                    auto t1 = std::chrono::high_resolution_clock::now();
+                    TDD intermediate = contract_MPS_tdds(state[q1], state[q2]);
+                    // this gives (mn)ac
+                    // // Contract intermediate with gate (ijmn) (important thing is to contract over m and n)
+                    // // gate contraction index is the same as the q1_to_q2_bond_index
+                    // TDD theta = contract_tdds(gate_TDD, intermediate, {1}, {0});
+                    TDD theta = apply_two_qubit_gate(gate, intermediate);
+                    auto t2 = std::chrono::high_resolution_clock::now();
+                    std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+                    tensor_space_time += ms_double.count();
+                    // (mn)ac , (ij)(mn) -> (ij)ac
+
                     // 2. Convert TDD to tensor for SVD
                     xarray<cd> theta_tensor = convert_TDD_to_tensor(theta);
                     // now that it is a tensor, we can apply the necessary reshape/axis swaps to get ibjc
                     // the reshapes handle the case where old_chi1 or old_chi2 is 1 before doing the axis swap
-                    if (q1_to_q2_bond_index == q2_to_q1_bond_index) {
-                        // then ijc, reshape to ij(1)c
-                        theta_tensor.reshape({2, 2, old_chi1, old_chi2});
-                    }
+                    theta_tensor.reshape({2, 2, old_chi1, old_chi2});
                     // swap (1) and j or j and a to get required form
                     theta_tensor = swapaxes(theta_tensor, 1, 2);
 
@@ -859,7 +681,6 @@ class MPS_Circuit : public TDD_Circuit {
             // calculate initial term, contracting from the right
             // TODO investigate whether this is sufficiently efficient (for higher bond dimension its slow)
 
-            // TODO need to absorb lambdas here somewhere
             TDD q_current;
             if (qubit == num_qubits - 1) {
                 q_current = kronecker_conjugate(state[num_qubits - 1].get_child_TDD(val));
@@ -875,8 +696,10 @@ class MPS_Circuit : public TDD_Circuit {
             for (uint32_t j = 0; j < num_qubits - 1; j++) {
                 uint32_t i = num_qubits - 2 - j;
                 TDD q_temp;
+                // old way
                 TDD current_state = state[i];
-                //absorb right lambda into the state, since i will be between 0 and num_qubits - 2
+                // absorb right lambda into the state, since i will be between 0 and num_qubits - 2
+                
                 xarray<cd> right = diag(lambda[i]);
                 TDD lambda_right = convert_tensor_to_TDD(right);
                 // dont delete current_state here as we need to preserve state[q2]
@@ -887,6 +710,8 @@ class MPS_Circuit : public TDD_Circuit {
                 TDD next_state = contract_tdds(current_state, lambda_right, {bond_index}, {0}, 0, false);
                 // but we can cleanup lambda_right here
                 lambda_right.cleanup();
+                // new way
+                // TDD next_state = apply_lambda_right(state[i], lambda[i], 0, false);
                 if (i == qubit) {
                     // then we can index by val
                     q_temp = kronecker_conjugate(next_state.get_child_TDD(val));
@@ -913,19 +738,30 @@ class MPS_Circuit : public TDD_Circuit {
             return probability;
         }
 
-        // TODO deprecate as this is inefficient
-        std::vector<double> get_qubit_probabilities(std::vector<uint16_t> qubits, std::vector<uint32_t> vals) {
-            TDD amalgam = state[0];
-            for (uint16_t i = 1; i < num_qubits; i++) {
-                TDD next_to_contract = state[i];
-                amalgam = contract_tdds(amalgam, next_to_contract, {i}, {1}, 0, false);
-            }
-            std::vector<double> probabilities;
-            for (uint32_t i = 0; i < qubits.size(); i++) {
-                probabilities.push_back(amalgam.get_probability_sum(qubits[i], vals[i]));
-            }
-            return probabilities;
-        }
+        // TODO fix this is wrong thanks to issues with apply_lambda_right not suiting this situation
+        // double get_qubit_probability_qiskit_style(uint16_t qubit, uint32_t val) {
+
+        //     TDD temp = state[qubit];
+        //     const TDD_Node *q_root = state[qubit].get_root();
+        //     cd q_weight = state[qubit].get_weight();
+        //     std::vector<size_t> shape = state[qubit].get_shape();
+        //     std::vector<size_t> q_shape(shape.begin() + 1, shape.end());
+        //     if (q_root->get_axis_index() == 0) {
+        //         // then index it
+        //         const TDD_Edge *edge = q_root->get_successor_ref(val);
+        //         q_root = edge->get_target();
+        //         q_weight *= edge->get_weight();
+        //     }
+
+        //     TDD q_state(q_root, q_weight, q_shape);
+        //     if (qubit != num_qubits - 1) {
+        //         q_state = apply_lambda_right(state[qubit], lambda[qubit]);
+        //     }
+            
+        //     xarray<cd> q_tens = convert_TDD_to_tensor(q_state);
+        //     q_tens.reshape({-1});
+        //     return std::real(sum(q_tens * conj(q_tens))(0));
+        // }
 
         uint64_t estimate_memory_usage() {
             // initialise to 64 bits for the two 32 bit integers
