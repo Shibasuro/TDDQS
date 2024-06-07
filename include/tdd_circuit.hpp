@@ -462,6 +462,9 @@ class MPS_Circuit : public TDD_Circuit {
                     auto t2 = std::chrono::high_resolution_clock::now();
                     std::chrono::duration<double, std::milli> ms_double = t2 - t1;
                     tensor_space_time += ms_double.count();
+                    // auto t2 = std::chrono::high_resolution_clock::now();
+                    // std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+                    // tensor_space_time += ms_double.count();
                     // (mn)ac , (ij)(mn) -> (ij)ac
 
                     // 2. Convert TDD to tensor for SVD
@@ -609,7 +612,6 @@ class MPS_Circuit : public TDD_Circuit {
         cd get_amplitude(xarray<size_t> indices) override {
             // these indices should all be 0 or 1 (as they are the physical indices
             // and thus dimension 2)
-            // TODO get_amplitude is not cleaning up some nodes/edges
             TDD amalgam = state[0].get_child_TDD(indices[0]);
             for (size_t i = 1; i < num_qubits; i++) {
                 // always absorb left lambda first

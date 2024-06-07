@@ -144,4 +144,107 @@ MPS_Circuit parse_circuit(std::string fname) {
     return circ;
 }
 
+TDD_Circuit parse_tdd_circuit(std::string fname) {
+    ast::ptr<ast::Program> parsed_circuit = parser::parse_file(fname);
+    // initialise state
+    uint32_t num_qubits = parsed_circuit->qubits();
+    // MPS_Circuit circ(num_qubits, "101010101");
+    TDD_Circuit circ(num_qubits);
+    for (std::list<ast::ptr<ast::Stmt>>::iterator it = parsed_circuit->begin(); it != parsed_circuit->end(); it++) {
+        if (dynamic_cast<ast::Gate*>(&(**it)) != nullptr) {
+            if (dynamic_cast<ast::DeclaredGate*>(&(**it)) != nullptr) {
+                auto gate = dynamic_cast<ast::DeclaredGate*>(&(**it));
+                std::string gate_type = gate->name();
+
+                // now compare gate type to check what type of gate it is, and add to circuit accordingly
+                // single qubit
+                if (gate->num_qargs() == 1) {
+                    uint32_t q1 = gate->qarg(0).offset().value();
+                    if (gate_type == "x") {
+                        circ.x(q1);
+                    }
+                    else if (gate_type == "y") {
+                        circ.y(q1);
+                    }
+                    else if (gate_type == "z") {
+                        circ.z(q1);
+                    }
+                    else if (gate_type == "h") {
+                        circ.h(q1);
+                    }
+                    else if (gate_type == "s") {
+                        circ.s(q1);
+                    }
+                    else if (gate_type == "t") {
+                        circ.t(q1);
+                    }
+                    else if (gate_type == "sx") {
+                        circ.sx(q1);
+                    }
+                    else if (gate_type == "rx") {
+                        double theta = gate->carg(0).constant_eval().value();
+                        circ.rx(q1, theta);
+                    }
+                    else if (gate_type == "ry") {
+                        double theta = gate->carg(0).constant_eval().value();
+                        circ.ry(q1, theta);
+                    }
+                    else if (gate_type == "rz") {
+                        double theta = gate->carg(0).constant_eval().value();
+                        circ.rz(q1, theta);
+                    }
+                    else if (gate_type == "tdg") {
+                        circ.tdg(q1);
+                    }
+                    else if (gate_type == "u1" || gate_type == "p") {
+                        double lambda = gate->carg(0).constant_eval().value();
+                        circ.u1(q1, lambda);
+                    }
+                    else if (gate_type == "u2") {
+                        double phi = gate->carg(0).constant_eval().value();
+                        double lambda = gate->carg(1).constant_eval().value();
+                        double pi_half = M_PI / 2.0;
+                        circ.u(q1, pi_half, phi, lambda);
+                    }
+                    else if (gate_type == "u3") {
+                        double theta = gate->carg(0).constant_eval().value();
+                        double phi = gate->carg(1).constant_eval().value();
+                        double lambda = gate->carg(2).constant_eval().value();
+                        circ.u(q1, theta, phi, lambda);
+                    }
+                    else {
+                        std::cout << "Unsupported gate: " << gate_type << std::endl;
+                    }
+                }
+                // otherwise two qubit?
+                else if (gate->num_qargs() == 2) {
+                    uint32_t q1 = gate->qarg(0).offset().value();
+                    uint32_t q2 = gate->qarg(1).offset().value();
+                    
+                    if (gate_type == "cx") {
+                        circ.cx(q1, q2);
+                    }
+                    // cp and cu1 are the same gate
+                    else if (gate_type == "cu1" || gate_type == "cp") {
+                        double lambda = gate->carg(0).constant_eval().value();
+                        circ.cu1(q1, q2, lambda);
+                    }
+                    else if (gate_type == "swap") {
+                        circ.swap(q1, q2);
+                    }
+                    else {
+                        std::cout << "Unsupported gate: " << gate_type << std::endl;
+                    }  
+                }
+            }
+        }
+        else if (dynamic_cast<ast::MeasureStmt*>(&(**it)) != nullptr) {
+            auto measure_stmt = dynamic_cast<ast::MeasureStmt*>(&(**it));
+            uint32_t qubit = measure_stmt->q_arg().offset().value();
+            circ.add_instruction(Instruction(Instr_type::MEASUREMENT, qubit));
+        }
+    }
+    return circ;
+}
+
 #endif

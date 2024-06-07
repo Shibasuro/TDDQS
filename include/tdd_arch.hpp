@@ -312,6 +312,7 @@ class TDD_Map {
         const TDD_Edge *add_edge(TDD_Edge edge) {
             check_edges();
             add_node(*(edge.get_target()));
+            auto t1 = std::chrono::high_resolution_clock::now();
             auto pr = edge_map.emplace(edge, 1);
             auto it = pr.first;
             if (!pr.second) {
@@ -324,6 +325,9 @@ class TDD_Map {
                 approximate_memory_usage += 64;
                 approximate_memory_usage += 128;
             }
+            auto t2 = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+            inc_time(ms_double.count());
 
             return &(it->first);
         }
@@ -359,6 +363,7 @@ class TDD_Map {
             if (remove_node) {
                 remove_node_ref(temp.get_target());
             }
+            auto t1 = std::chrono::high_resolution_clock::now();
             auto it = edge_map.find(temp);
             if (it != edge_map.end()) {
                 it->second -= 1;
@@ -371,6 +376,9 @@ class TDD_Map {
                     approximate_memory_usage -= 128;
                 }
             }
+            auto t2 = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+            inc_time(ms_double.count());
         }
         
         // for this I need to make sure the weight is directly propagated upwards in recursive def
@@ -402,6 +410,11 @@ class TDD_Map {
 
         void print_time() {
             std::cout << "Time taken for specific task: " << time << "ms" << std::endl;
+        }
+
+        void reset() {
+            node_map.clear();
+            edge_map.clear();
         }
         
         void print_maps() {
@@ -1474,11 +1487,11 @@ TDD multiply_v_m(TDD &v, TDD &m, uint16_t axis1 = 0, uint16_t axis2 = 0) {
             tdds_to_add.push_back(TDD(m2pp, w1 * w2, {dim2}));
         }
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
+    // auto t1 = std::chrono::high_resolution_clock::now();
     TDD temp = add_tdds(tdds_to_add, false);
-    auto t2 = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> ms_double = t2 - t1;
-    cache_map.inc_time(ms_double.count());
+    // auto t2 = std::chrono::high_resolution_clock::now();
+    // std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+    // cache_map.inc_time(ms_double.count());
     return temp;
     // return add_tdds(tdds_to_add, false);
 }
@@ -1690,14 +1703,11 @@ TDD apply_gate(xarray<cd> &gate, TDD &tdd, uint32_t dim) {
             std::vector s_shape(shape.begin() + 1, shape.end());
             tdds_to_add.push_back(TDD(summand, gate(i,j) * s_weight, s_shape));
         }
-        // TODO problem as add_tdds may end up deleting some of the items in tdds_to_add
-        // need a way for add_tdds to not delete any of the original nodes but stay cleaned up?
-        // otherwise need to duplicate the summands
-        auto t1 = std::chrono::high_resolution_clock::now();
+        // auto t1 = std::chrono::high_resolution_clock::now();
         TDD new_child = add_tdds(tdds_to_add, false);
-        auto t2 = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> ms_double = t2 - t1;
-        cache_map.inc_time(ms_double.count());
+        // auto t2 = std::chrono::high_resolution_clock::now();
+        // std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+        // cache_map.inc_time(ms_double.count());
 
         const TDD_Node *new_child_root = new_child.get_root();
         cd new_weight = new_child.get_weight();

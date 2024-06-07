@@ -9,7 +9,7 @@ inline bool is_approx_equal(cd x, cd y, double epsilon = 1e-16) {
     else if (std::norm(y - cd(0,0)) < epsilon) {
         return std::norm(x) < epsilon;
     }
-    return std::norm(x - y) <= epsilon;
+    return (std::abs(std::real(x) - std::real(y)) <= epsilon) && (std::abs(std::imag(x) - std::imag(y)) <= epsilon);
 }
 
 double convert_bits_to_kb(uint64_t bits) {
