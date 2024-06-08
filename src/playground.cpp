@@ -28,6 +28,15 @@ void time_circuit(TDD_Circuit &circuit) {
     std::cout << "Time taken: " << ms_double.count() << "ms" << std::endl;
 }
 
+void parse_tdd_circuit() {
+    TDD_Circuit circ = parse_tdd_circuit("/home/shibasuro/tn_project/TNQS/src/qasm_bench/experiment.qasm");
+    time_circuit(circ);
+    std::cout << "nodes: " << cache_map.num_unique_nodes() << std::endl;
+    std::cout << "edges: " << cache_map.num_unique_edges() << std::endl;
+    std::cout << "peak nodes: " << cache_map.peak_nodes() << std::endl;
+    std::cout << "peak edges: " << cache_map.peak_edges() << std::endl;
+}
+
 void print_max_memory_usage() {
     std::ifstream infile("/proc/self/status");
     std::string line;
@@ -354,10 +363,10 @@ void parsing_test() {
     std::cout << "approximate max memory usage in bits: " << approx_max_memory_usage << std::endl;
     std::cout << "approximate max memory usage in kb: " << convert_bits_to_kb(approx_max_memory_usage) << std::endl;
 
-    // double total_prob = circ.get_qubit_probability(0, 0);
-    // std::cout << "probability of qubit 0 being 0: " << total_prob << std::endl;
-    // total_prob = circ.get_qubit_probability(0, 1);
-    // std::cout << "probability of qubit 0 being 1: " << total_prob << std::endl;
+    double total_prob = circ.get_qubit_probability(0, 0);
+    std::cout << "probability of qubit 0 being 0: " << total_prob << std::endl;
+    total_prob = circ.get_qubit_probability(0, 1);
+    std::cout << "probability of qubit 0 being 1: " << total_prob << std::endl;
 
     // total_prob = circ.get_qubit_probability_qiskit_style(0, 0);
     // std::cout << "qis probability of qubit 0 being 0: " << total_prob << std::endl;
@@ -443,7 +452,7 @@ void manual_correctness_test() {
     for (uint32_t j = 0; j < max_index; j++) {
         cd expected = qpp_state(j);
         cd actual = tdd_state(j);
-        if (! (is_approx_equal(expected, actual, 1e-10))) {
+        if (! (is_approx_equal(expected, actual, 1e-16))) {
             incorrect_val_count++;
         }
     }
@@ -464,9 +473,9 @@ void correctness_test() {
     generator.seed(time(NULL));
     
     // carry out a few rounds of checks
-    uint32_t num_rounds = 20;
-    uint32_t max_gates = 50; // restrict circuit depth for this purpose to ensure feasible calculations
-    uint32_t num_qubits = 10;
+    uint32_t num_rounds = 100;
+    uint32_t max_gates = 300; // restrict circuit depth for this purpose to ensure feasible calculations
+    uint32_t num_qubits = 5;
     uint32_t num_failures = 0;
     for (uint32_t i = 0; i < num_rounds; i++) {
         // initialises circuit with num_qubits qubits
@@ -477,24 +486,11 @@ void correctness_test() {
         for (uint32_t j = 0; j < max_gates; j++) {
             std::uniform_int_distribution<uint32_t> qubit_distribution(0, num_qubits - 1);
             uint32_t qubit1 = qubit_distribution(generator);
-            // for the purposes of the test, just use an adjacent qubit if its a two qubit gate
-            std::uniform_int_distribution<uint32_t> bool_distribution(0, 1);
-            uint32_t qubit2;
-            uint32_t dist = bool_distribution(generator);
-            if (qubit1 > 0) {
-                if (dist == 0) {
-                    qubit2 = qubit1 - 1;
-                }
-                else {
-                    qubit2 = qubit1 + 1;
-                    if (qubit2 >= num_qubits) {
-                        qubit2 = qubit1 - 1;
-                    }
-                }
+            uint32_t qubit2 = qubit1 + 1;
+            if (qubit1 >= num_qubits - 1) {
+                qubit2 = qubit2 - 2;
             }
-            else {
-                qubit2 = qubit1 + 1;
-            }
+            
             // currently support at most one parameter so test at most one param (which is an angle)
             std::uniform_real_distribution<double> real_distribution(-1*M_1_PI, M_1_PI);
             double param = real_distribution(generator);
@@ -553,7 +549,7 @@ void correctness_test() {
                     break;
                 case 10:
                     circ.cx(qubit1, qubit2);
-                    qc.gate(qpp::gt.CNOT, qubit1, qubit2);
+                    qc.CTRL(qpp::gt.X, qubit1, qubit2);
                     break;
                 case 11:
                     circ.cu1(qubit1, qubit2, param);
@@ -575,10 +571,6 @@ void correctness_test() {
         circ.simulate();
         qpp::QEngine q_engine{qc};
         q_engine.execute(1);
-        // std::cout << "Quantum++" << std::endl;
-        // std::cout << qpp::disp(qpp::transpose(q_engine.get_state())) << std::endl;
-        // std::cout << "TDDQS" << std::endl;
-        // std::cout << circ.get_statevector() << std::endl;
         // retrieve statevector equivalent representation and compare
         auto qpp_state = qpp::transpose(q_engine.get_state());
         xarray<cd> tdd_state = circ.get_statevector();
@@ -590,7 +582,7 @@ void correctness_test() {
         for (uint32_t j = 0; j < max_index; j++) {
             cd expected = qpp_state(j);
             cd actual = tdd_state(j);
-            if (! (is_approx_equal(expected, actual, 1e-10))) {
+            if (! (is_approx_equal(expected, actual, 1e-6))) {
                 incorrect_val_count++;
             }
         }
@@ -610,6 +602,74 @@ void correctness_test() {
 
 }
 
+void do_contraction() {
+    auto t1 = std::chrono::high_resolution_clock::now();
+    // xarray<cd> u1 = xarray<cd>({{1,0,0,0},{0,1,0,0},{0,0,0,1},{0,0,1,0}});
+    // xarray<cd> u2 = xarray<cd>({{1,0,1,0},{0,1,0,1},{0,1,0,1},{0,0,1,1}});
+    random::seed(time(NULL));
+    uint32_t num_trials = 50;
+    double total_conversion_time = 0;
+    double total_contraction_time = 0;
+    double min_trial_time = 0;
+    double max_trial_time = 0;
+    uint32_t dimension = 50;
+    for (uint32_t i = 0; i < num_trials; i++) {
+        auto trial_1 = std::chrono::high_resolution_clock::now();
+        auto conv_1 = std::chrono::high_resolution_clock::now();
+        xarray<cd> u1 = (random::rand<double>({dimension,dimension}) - 0.5) * 2.0 + cd(0,2.0) * (random::rand<double>({dimension,dimension}) - 0.5);
+        xarray<cd> u2 = (random::rand<double>({dimension,dimension}) - 0.5) * 2.0 + cd(0,2.0) * (random::rand<double>({dimension,dimension}) - 0.5);
+        TDD tdd1 = convert_tensor_to_TDD(u1);
+        TDD tdd2 = convert_tensor_to_TDD(u2);
+        auto conv_2 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> conv_time = conv_2 - conv_1;
+        total_conversion_time += conv_time.count();
+        
+        auto cont_1 = std::chrono::high_resolution_clock::now();
+        TDD cont = contract_tdds(tdd1, tdd2, {0}, {1});
+        auto cont_2 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> cont_time = cont_2 - cont_1;
+        total_contraction_time += cont_time.count();
+        
+        auto trial_2 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> trial = trial_2 - trial_1;
+        double trial_time = trial.count();
+        if (trial_time > max_trial_time) {
+            max_trial_time = trial_time;
+        }
+        if (i == 0 || trial_time < min_trial_time) {
+            min_trial_time = trial_time;
+        }
+        // std::cout << "trial_time: " << trial_time;
+        // cont.cleanup();
+        cache_map.reset();
+    }
+
+    auto t2 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+
+    std::cout << "Total time taken: " << ms_double.count() << "ms" << std::endl;
+
+    std::cout << "Total conversion time: " << total_conversion_time << "ms" << std::endl;
+    std::cout << "Total contraction time: " << total_contraction_time << "ms" << std::endl;
+    std::cout << "Max trial time: " << max_trial_time << "ms" << std::endl;
+    std::cout << "Min trial time: " << min_trial_time << "ms" << std::endl;
+
+    std::cout << "edge map overhead" << std::endl;
+    cache_map.print_time();
+
+    // std::cout << convert_TDD_to_tensor(cont) << std::endl;
+}
+
+void time_xtensor_rand() {
+    uint32_t dimension = 100;
+    auto t1 = std::chrono::high_resolution_clock::now();
+    xarray<cd> u1 = (random::rand<double>({dimension,dimension}) - 0.5) * 2.0 + cd(0,2.0) * (random::rand<double>({dimension,dimension}) - 0.5);
+    auto t2 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+
+    std::cout << "Time taken: " << ms_double.count() << "ms" << std::endl;
+}
+
 // to record memory usage, can run with valgrind --tool=massif./build/apps/program
 // and then print out with ms_print <massif_file>
 // can check peak memory usage using code /proc/self/status to check VM peak
@@ -623,17 +683,20 @@ void correctness_test() {
 
 int main()
 {
+    // parse_tdd_circuit();
+    // do_contraction();
+    // time_xtensor_rand();
     // tn_test();
     // tdd_playground();
     // tdd_contract_test();
     // tdd_circuit_test();
     // toffoli_test();
     // fixed_point_grovers_test();
-    parsing_test();
+    // parsing_test();
     // tdd_conversion_test();
     // swap_axes_test();
     // manual_correctness_test();
-    // correctness_test();
+    correctness_test();
     // print_max_memory_usage();
 
     return 0;

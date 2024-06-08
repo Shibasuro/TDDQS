@@ -295,7 +295,7 @@ class MPS_Circuit : public TDD_Circuit {
                 if (!mult) {
                     lambda_local = 1.0 / lambda_local;
                 }
-                if (state[qubit].get_weight() == cd(0,0) || is_approx_equal(lambda_local(0)*lambda_local(0),cd(1,0))) {
+                if (state[qubit].get_weight() == cd(0,0) || lambda_local.shape()[0] == 1) {
                     // do not need to do anything if its 0 or if lambda_local is just 1d identity
                     return;
                 }
@@ -308,7 +308,7 @@ class MPS_Circuit : public TDD_Circuit {
                 if (!mult) {
                     lambda_local = 1.0 / lambda_local;
                 }
-                if (state[qubit].get_weight() == cd(0,0) || is_approx_equal(lambda_local(0)*lambda_local(0),cd(1,0))) {
+                if (state[qubit].get_weight() == cd(0,0) || lambda_local.shape()[0] == 1) {
                     // do not need to do anything if its 0 or if lambda_local is just 1d identity
                     return;
                 }
@@ -420,7 +420,6 @@ class MPS_Circuit : public TDD_Circuit {
                     // xarray<cd> bond = diag(lambda[q1]);
                     // TDD lambda_bond = convert_tensor_to_TDD(bond);
                     // state[q1] = contract_tdds(state[q1], lambda_bond, {q1_to_q2_bond_index}, {0});
-
                     // new and improved lambda absorption
                     if (q1 > 0) {
                         absorb_lambda(q1);
@@ -439,29 +438,25 @@ class MPS_Circuit : public TDD_Circuit {
                     // CAN these two contraction cases be made more efficient?
                     // auto t1 = std::chrono::high_resolution_clock::now();
                     // inefficient old setup
-                    // TDD intermediate = contract_tdds(state[q1], state[q2], {q1_to_q2_bond_index}, {q2_to_q1_bond_index});
+                    // TDD intermediate = contract_tdds(state[q1], state[q2], {q1_to_q2_bond_index}, {1});
                     // // mab, nbc -> manc
                     // // or have mb, nbc -> mnc
 
                     // // Contract intermediate with gate (ijmn) (important thing is to contract over m and n)
                     // // gate contraction index is the same as the q1_to_q2_bond_index
                     // TDD theta = contract_tdds(intermediate, gate_TDD, {0, q1_to_q2_bond_index}, {2, 3});
-                    // manc, ijmn -> ijac
-                    // mnc, ijmn -> ijc
-                    // effectively want final output to be iajc or i(1)jc
-                    // so we need to do reshapes/swapaxes
+                    // // manc, ijmn -> ijac
+                    // // mnc, ijmn -> ijc
+                    // // effectively want final output to be iajc or i(1)jc
+                    // // so we need to do reshapes/swapaxes
 
                     // new, more efficient setup
-                    auto t1 = std::chrono::high_resolution_clock::now();
+                    // auto t1 = std::chrono::high_resolution_clock::now();
                     TDD intermediate = contract_MPS_tdds(state[q1], state[q2]);
                     // this gives (mn)ac
                     // // Contract intermediate with gate (ijmn) (important thing is to contract over m and n)
                     // // gate contraction index is the same as the q1_to_q2_bond_index
-                    // TDD theta = contract_tdds(gate_TDD, intermediate, {1}, {0});
                     TDD theta = apply_two_qubit_gate(gate, intermediate);
-                    auto t2 = std::chrono::high_resolution_clock::now();
-                    std::chrono::duration<double, std::milli> ms_double = t2 - t1;
-                    tensor_space_time += ms_double.count();
                     // auto t2 = std::chrono::high_resolution_clock::now();
                     // std::chrono::duration<double, std::milli> ms_double = t2 - t1;
                     // tensor_space_time += ms_double.count();
