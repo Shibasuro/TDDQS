@@ -248,6 +248,7 @@ class MPS_Circuit : public TDD_Circuit {
         double tensor_space_time = 0;
 
         uint32_t max_chi = std::numeric_limits<uint32_t>::max();
+        uint32_t peak_chi = 1;
 
         double uniform_rand_in_range(double min, double max) {
             std::uniform_real_distribution<double> distribution(min, max);
@@ -457,6 +458,7 @@ class MPS_Circuit : public TDD_Circuit {
                     // // Contract intermediate with gate (ijmn) (important thing is to contract over m and n)
                     // // gate contraction index is the same as the q1_to_q2_bond_index
                     TDD theta = apply_two_qubit_gate(gate, intermediate);
+                    // TDD theta = contract_tdds(gate_TDD, intermediate, {1}, {0});
                     // auto t2 = std::chrono::high_resolution_clock::now();
                     // std::chrono::duration<double, std::milli> ms_double = t2 - t1;
                     // tensor_space_time += ms_double.count();
@@ -505,6 +507,9 @@ class MPS_Circuit : public TDD_Circuit {
                     // if this would push us over the limit, then we restrict to max_chi at cost of fidelity
                     if (new_chi > max_chi) {
                         new_chi = max_chi;
+                    }
+                    if (new_chi > peak_chi) {
+                        peak_chi = new_chi;
                     }
                     // std::cout << "new_chi: " << new_chi << std::endl;
                     xarray<cd> u_prime = view(u, all(), range(0, new_chi));
@@ -581,6 +586,7 @@ class MPS_Circuit : public TDD_Circuit {
 
         void print_tensor_space_time() {
             std::cout << "Time taken converting between forms and in tensor space: " << tensor_space_time << "ms" << std::endl;
+            std::cout << "Max Bond Dimension: " << peak_chi << std::endl;
         }
 
         void print_mps_state() {
@@ -733,6 +739,29 @@ class MPS_Circuit : public TDD_Circuit {
             // now q_current should contain the final weight
             double probability = std::real(q_current.get_weight());
             return probability;
+        }
+
+        // TODO experimental, do it in TDD space in future too
+        double get_single_qubit_probability(uint16_t qubit, uint32_t val) {
+            xarray<cd> temp = convert_TDD_to_tensor(state[qubit]);
+            state[qubit] = convert_tensor_to_TDD(temp);
+            if (qubit > 0) {
+                xarray<cd> lambda_left = diag(lambda[qubit - 1]);
+                temp = linalg::tensordot(temp, lambda_left, {1}, {1});
+                temp = swapaxes(temp, {1}, {2});
+            }
+            if (qubit < num_qubits - 1) {
+                xarray<cd> lambda_right = diag(lambda[qubit]);
+                uint32_t index = 2;
+                if (qubit == 0) {
+                    index = 1;
+                }
+                temp = linalg::tensordot(temp, lambda_right, {index}, {0});
+            }
+            temp = view(temp, val, all(), all());
+            temp.reshape({-1});
+            double prob = std::real(sum(temp * conj(temp))(0));
+            return prob;
         }
 
         // TODO fix this is wrong thanks to issues with apply_lambda_right not suiting this situation

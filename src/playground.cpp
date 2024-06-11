@@ -363,10 +363,15 @@ void parsing_test() {
     std::cout << "approximate max memory usage in bits: " << approx_max_memory_usage << std::endl;
     std::cout << "approximate max memory usage in kb: " << convert_bits_to_kb(approx_max_memory_usage) << std::endl;
 
-    double total_prob = circ.get_qubit_probability(0, 0);
-    std::cout << "probability of qubit 0 being 0: " << total_prob << std::endl;
-    total_prob = circ.get_qubit_probability(0, 1);
-    std::cout << "probability of qubit 0 being 1: " << total_prob << std::endl;
+    // double total_prob = circ.get_qubit_probability(1, 0);
+    // std::cout << "probability of qubit 0 being 0: " << total_prob << std::endl;
+    // total_prob = circ.get_qubit_probability(1, 1);
+    // std::cout << "probability of qubit 0 being 1: " << total_prob << std::endl;
+
+    // total_prob = circ.get_single_qubit_probability(1, 0);
+    // std::cout << "probability of qubit 0 being 0: " << total_prob << std::endl;
+    // total_prob = circ.get_single_qubit_probability(1, 1);
+    // std::cout << "probability of qubit 0 being 1: " << total_prob << std::endl;
 
     // total_prob = circ.get_qubit_probability_qiskit_style(0, 0);
     // std::cout << "qis probability of qubit 0 being 0: " << total_prob << std::endl;
@@ -602,22 +607,22 @@ void correctness_test() {
 
 }
 
-void do_contraction() {
+void do_contraction(uint32_t num_trials = 20, uint32_t dimension = 100) {
     auto t1 = std::chrono::high_resolution_clock::now();
     // xarray<cd> u1 = xarray<cd>({{1,0,0,0},{0,1,0,0},{0,0,0,1},{0,0,1,0}});
     // xarray<cd> u2 = xarray<cd>({{1,0,1,0},{0,1,0,1},{0,1,0,1},{0,0,1,1}});
     random::seed(time(NULL));
-    uint32_t num_trials = 50;
     double total_conversion_time = 0;
     double total_contraction_time = 0;
     double min_trial_time = 0;
     double max_trial_time = 0;
-    uint32_t dimension = 50;
     for (uint32_t i = 0; i < num_trials; i++) {
+        // auto trial_1 = std::chrono::high_resolution_clock::now();
+        // auto conv_1 = std::chrono::high_resolution_clock::now();
+        xarray<cd> u1 = (random::rand<double>({dimension,dimension,dimension}) - 0.5) * 2.0 + cd(0,2.0) * (random::rand<double>({dimension,dimension,dimension}) - 0.5);
+        xarray<cd> u2 = (random::rand<double>({dimension,dimension,dimension}) - 0.5) * 2.0 + cd(0,2.0) * (random::rand<double>({dimension,dimension,dimension}) - 0.5);
         auto trial_1 = std::chrono::high_resolution_clock::now();
         auto conv_1 = std::chrono::high_resolution_clock::now();
-        xarray<cd> u1 = (random::rand<double>({dimension,dimension}) - 0.5) * 2.0 + cd(0,2.0) * (random::rand<double>({dimension,dimension}) - 0.5);
-        xarray<cd> u2 = (random::rand<double>({dimension,dimension}) - 0.5) * 2.0 + cd(0,2.0) * (random::rand<double>({dimension,dimension}) - 0.5);
         TDD tdd1 = convert_tensor_to_TDD(u1);
         TDD tdd2 = convert_tensor_to_TDD(u2);
         auto conv_2 = std::chrono::high_resolution_clock::now();
@@ -625,7 +630,7 @@ void do_contraction() {
         total_conversion_time += conv_time.count();
         
         auto cont_1 = std::chrono::high_resolution_clock::now();
-        TDD cont = contract_tdds(tdd1, tdd2, {0}, {1});
+        TDD cont = contract_tdds(tdd1, tdd2, {1}, {1});
         auto cont_2 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> cont_time = cont_2 - cont_1;
         total_contraction_time += cont_time.count();
@@ -651,13 +656,62 @@ void do_contraction() {
 
     std::cout << "Total conversion time: " << total_conversion_time << "ms" << std::endl;
     std::cout << "Total contraction time: " << total_contraction_time << "ms" << std::endl;
-    std::cout << "Max trial time: " << max_trial_time << "ms" << std::endl;
-    std::cout << "Min trial time: " << min_trial_time << "ms" << std::endl;
+    // std::cout << "Max trial time: " << max_trial_time << "ms" << std::endl;
+    // std::cout << "Min trial time: " << min_trial_time << "ms" << std::endl;
 
     std::cout << "edge map overhead" << std::endl;
     cache_map.print_time();
 
     // std::cout << convert_TDD_to_tensor(cont) << std::endl;
+}
+
+void left_lambda_comparison(uint32_t num_trials = 10, uint32_t bond_dimension = 1500) {
+    random::seed(time(NULL));
+    // uint32_t num_trials = 10;
+    // uint32_t bond_dimension = 1500;
+    uint32_t p_dim = 2;
+    double total_tensor_time = 0;
+    double total_tdd_time = 0;
+    double total_conv_time = 0;
+    for (uint32_t i = 0; i < num_trials; i++) {
+        xarray<cd> tensor = (random::rand<double>({p_dim,bond_dimension,bond_dimension}) - 0.5) * 2.0 + cd(0,2.0) * (random::rand<double>({p_dim,bond_dimension,bond_dimension}) - 0.5);
+        xarray<cd> lambda = (random::rand<double>({bond_dimension})) + cd(0,1.0) * (random::rand<double>({bond_dimension}));
+        auto c1 = std::chrono::high_resolution_clock::now();
+        TDD tdd = convert_tensor_to_TDD(tensor);
+        auto c2 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> c_ms_double = c2 - c1;
+        total_conv_time += c_ms_double.count();
+        // tensor space absorption
+        auto t1 = std::chrono::high_resolution_clock::now();
+        for (uint32_t j = 0; j < 2; j++) {
+            for (uint32_t col = 0; col < bond_dimension; col++) {
+                for (uint32_t row = 0; row < bond_dimension; row++) {
+                    tensor(j, row, col) *= lambda(row);
+                }
+            }
+        }
+        auto t2 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+        total_tensor_time += ms_double.count();
+        
+
+        // TDD space absorption
+        auto d1 = std::chrono::high_resolution_clock::now();
+        TDD res = apply_lambda_left(tdd, lambda);
+        auto d2 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> d_ms_double = d2 - d1;
+        total_tdd_time += d_ms_double.count();
+
+        cache_map.reset();
+    }
+
+    std::cout << "Total tensor absorption time: " << total_tensor_time << "ms" << std::endl;
+    std::cout << "Total TDD absorption time " << total_tdd_time << "ms" << std::endl;
+    std::cout << "Total conversion time " << total_conv_time << "ms" << std::endl;
+    // std::cout << "Average tensor absorption time: " << total_tensor_time / num_trials << "ms" << std::endl;
+    // std::cout << "Average TDD absorption time " << total_tdd_time / num_trials << "ms" << std::endl;
+
+    // cache_map.print_time();
 }
 
 void time_xtensor_rand() {
@@ -668,6 +722,32 @@ void time_xtensor_rand() {
     std::chrono::duration<double, std::milli> ms_double = t2 - t1;
 
     std::cout << "Time taken: " << ms_double.count() << "ms" << std::endl;
+}
+
+void time_tdd_mps() {
+    MPS_Circuit circ = parse_circuit("/home/shibasuro/tn_project/TNQS/src/qasm_bench/experiment.qasm");
+    // circ.print_num_gates();
+    time_circuit(circ);
+    circ.print_tensor_space_time();
+    cache_map.print_time();
+}
+
+void time_qpp() {
+    qpp::QCircuit qc = qpp::qasm::read_from_file("/home/shibasuro/tn_project/TNQS/src/qasm_bench/experiment.qasm");
+
+    // initialize the quantum engine with a circuit
+    qpp::QEngine q_engine{qc};
+
+    // display the circuit resources
+    // std::cout << "\n" << qc.get_resources() << "\n\n";
+    auto t1 = std::chrono::high_resolution_clock::now();
+    // execute the quantum circuit
+    qpp::idx reps = 1; // repetitions
+    q_engine.execute(reps);
+    auto t2 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+
+    std::cout << "Q++ time taken: " << ms_double.count() << "ms" << std::endl;
 }
 
 // to record memory usage, can run with valgrind --tool=massif./build/apps/program
@@ -696,8 +776,11 @@ int main()
     // tdd_conversion_test();
     // swap_axes_test();
     // manual_correctness_test();
-    correctness_test();
+    // correctness_test();
     // print_max_memory_usage();
+    // left_lambda_comparison();
+    time_tdd_mps();
+    // time_qpp();
 
     return 0;
 }
