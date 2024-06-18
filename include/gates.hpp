@@ -113,6 +113,15 @@ xarray<cd> u_gate(std::vector<double> params) {
 
 // Non-parametric two qubit gates
 
+xarray<cd> id_gate() {
+    xarray<cd> id = zeros<cd>({4,4});
+    id(0,0) = cd(1,0);
+    id(1,1) = cd(1,0);
+    id(2,2) = cd(1,0);
+    id(3,3) = cd(1,0);
+    return id;
+}
+
 xarray<cd> controlled_not_gate() {
     xarray<cd> controlled_not = zeros<cd>({4,4});
     controlled_not(0,0) = cd(1,0);

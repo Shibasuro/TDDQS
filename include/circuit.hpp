@@ -6,6 +6,7 @@
 
 using namespace xt;
 
+// TODO add name to Gate class for the sake of hardcoding certain gate implementations
 class Gate {
     private:
         // supports single and two-qubit gates

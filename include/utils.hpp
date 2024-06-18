@@ -3,13 +3,13 @@
 
 typedef std::complex<double> cd;
 inline bool is_approx_equal(cd x, cd y, double epsilon = 1e-16) {
-    if (std::norm(x - cd(0,0)) < epsilon) {
+    if (std::norm(x) < epsilon) {
         return std::norm(y) < epsilon;
     }
-    else if (std::norm(y - cd(0,0)) < epsilon) {
+    else if (std::norm(y) < epsilon) {
         return std::norm(x) < epsilon;
     }
-    return std::norm(x - y) <= epsilon;
+    return (std::abs(std::real(x) - std::real(y)) <= epsilon) && (std::abs(std::imag(x) - std::imag(y)) <= epsilon);
 }
 
 double convert_bits_to_kb(uint64_t bits) {

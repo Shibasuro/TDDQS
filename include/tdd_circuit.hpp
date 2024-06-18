@@ -138,9 +138,9 @@ class TDD_Circuit {
         }
 
         void simulate() {
-            uint32_t i = 0;
+            // uint32_t i = 0;
             for (Instruction instr : instructions) {
-                std::cout << "applying instr: " << i++ << std::endl;
+                // std::cout << "applying instr: " << i++ << std::endl;
                 apply_instruction(instr);
             }
         }
@@ -179,6 +179,14 @@ class TDD_Circuit {
 
         void tdg(uint32_t q1) {
             add_instruction(Instruction(Instr_type::GATE, Gate(&t_dagger_gate, true), q1));
+        }
+
+        void rx(uint32_t q1, double theta) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&rx_gate, true, {theta}), q1));
+        }
+
+        void ry(uint32_t q1, double theta) {
+            add_instruction(Instruction(Instr_type::GATE, Gate(&ry_gate, true, {theta}), q1));
         }
 
         void rz(uint32_t q1, double theta) {
@@ -237,8 +245,10 @@ class MPS_Circuit : public TDD_Circuit {
         // measurement probability
         std::vector<xarray<cd>> lambda;
         std::default_random_engine generator;
+        double tensor_space_time = 0;
 
         uint32_t max_chi = std::numeric_limits<uint32_t>::max();
+        uint32_t peak_chi = 1;
 
         double uniform_rand_in_range(double min, double max) {
             std::uniform_real_distribution<double> distribution(min, max);
@@ -270,17 +280,64 @@ class MPS_Circuit : public TDD_Circuit {
             generator.seed(time(NULL));
         }
 
+        // TODO IF REBUILDING CODE, MAY BE WORTH DOING WITHOUT EDGES MAP (just keep node map)
+
+        // WIP, TODO do proper cleanup
+        void absorb_lambda(uint32_t qubit, bool left = true, bool mult = true) {
+            xarray<cd> lambda_local;
+            if (left || qubit == 0) {
+                if (qubit == 0) {
+                    // absorbing from the right for qubit 0 is the same as left absorption
+                    lambda_local = lambda[0];
+                }
+                else {
+                    lambda_local = lambda[qubit - 1];
+                }
+                if (!mult) {
+                    lambda_local = 1.0 / lambda_local;
+                }
+                if (state[qubit].get_weight() == cd(0,0) || lambda_local.shape()[0] == 1) {
+                    // do not need to do anything if its 0 or if lambda_local is just 1d identity
+                    return;
+                }
+                
+                state[qubit] = apply_lambda_left(state[qubit], lambda_local);
+            }
+            else {
+                // otherwise absorbing lambda from the right, qubit != 0
+                lambda_local = lambda[qubit];
+                if (!mult) {
+                    lambda_local = 1.0 / lambda_local;
+                }
+                if (state[qubit].get_weight() == cd(0,0) || lambda_local.shape()[0] == 1) {
+                    // do not need to do anything if its 0 or if lambda_local is just 1d identity
+                    return;
+                }
+                state[qubit] = apply_lambda_right(state[qubit], lambda_local);
+            }
+        }
+
         void apply_instruction(Instruction instr) override {
             if (instr.get_type() == Instr_type::GATE) {
                 // then we are applying a gate
                 if (instr.is_single_qubit_gate()) {
+                    // New Implementation
+                    // uint32_t target = instr.get_q1();
+                    // Gate gate = instr.get_gate();
+                    // apply_single_qubit_gate(target, gate);
+                    
+                    // Old Inefficient Implementation
                     // then it is single qubit gate, so this is same as original case, just contract
                     xarray<cd> gate = instr.get_gate().get_gate();
-                    TDD gate_TDD = convert_tensor_to_TDD(gate);
                     uint32_t target = instr.get_q1();
 
                     // only need to update the qubit the gate is being applied to
-                    state[target] = contract_tdds(gate_TDD, state[target], {1}, {0});
+
+                    // old version
+                    // TDD gate_TDD = convert_tensor_to_TDD(gate);
+                    // state[target] = contract_tdds(gate_TDD, state[target], {1}, {0});
+                    // more efficient
+                    state[target] = apply_single_qubit_gate(gate, state[target]);
                 }
                 else {
                     // otherwise its a two qubit gate
@@ -292,6 +349,7 @@ class MPS_Circuit : public TDD_Circuit {
                     uint32_t q2 = instr.get_q2();
                     // make sure we always use the lower qubit number q1, and adjust the gate
                     // accordingly to make sure gate is still applied correctly?
+                    // TODO defer changes to the gate to the apply_two_qubit_gate
                     if (q2 < q1) {
                         uint32_t temp = q2;
                         q2 = q1;
@@ -301,7 +359,9 @@ class MPS_Circuit : public TDD_Circuit {
                         gate = swapaxes(gate, {2}, {3});
                         gate = swapaxes(gate, {0}, {1});
                     }
-                    TDD gate_TDD = convert_tensor_to_TDD(gate);
+                    // TODO Temporary convert back to 4x4 matrix for efficiency testing
+                    gate.reshape({4,4});
+                    // TDD gate_TDD = convert_tensor_to_TDD(gate);
 
                     // now need to contract the two relevant MPS states state[q1] and state[q2]
                     // also contracting them with the gate itself
@@ -319,7 +379,6 @@ class MPS_Circuit : public TDD_Circuit {
                     // index will be either 1 or 2 as it is MPS, each is either {2,1} or {2,1,1}
                     uint16_t q1_to_q2_bond_index;
                     // q2 will always use bond index one in this case (as it is going left)
-                    uint16_t q2_to_q1_bond_index = 1;
                     if (q1 == 0) {
                         q1_to_q2_bond_index = 1;
                     }
@@ -346,56 +405,70 @@ class MPS_Circuit : public TDD_Circuit {
                         // always the case as q1 < q2
                         old_chi2 = shape2[2];
                     }
-                    xarray<cd> temp1 = convert_TDD_to_tensor(state[q1]);
-                    state[q1] = convert_tensor_to_TDD(temp1);
-                    xarray<cd> temp2 = convert_TDD_to_tensor(state[q2]);
-                    state[q2] = convert_tensor_to_TDD(temp2);
                     // absorb lambdas
+                    // auto t1 = std::chrono::high_resolution_clock::now();
+                    // old lambda absorption
+                    // if (q1 > 0) {
+                    //     xarray<cd> left = diag(lambda[q1 - 1]);
+                    //     TDD lambda_left = convert_tensor_to_TDD(left);
+                    //     state[q1] = contract_tdds(state[q1], lambda_left, {1}, {1});
+                    // }
+                    // if (q2 < num_qubits - 1) {
+                    //     xarray<cd> right = diag(lambda[q2]);
+                    //     TDD lambda_right = convert_tensor_to_TDD(right);
+                    //     state[q2] = contract_tdds(state[q2], lambda_right, {2}, {1});
+                    // }
+                    // xarray<cd> bond = diag(lambda[q1]);
+                    // TDD lambda_bond = convert_tensor_to_TDD(bond);
+                    // state[q1] = contract_tdds(state[q1], lambda_bond, {q1_to_q2_bond_index}, {0});
+                    // new and improved lambda absorption
                     if (q1 > 0) {
-                        xarray<cd> left = diag(lambda[q1 - 1]);
-                        TDD lambda_left = convert_tensor_to_TDD(left);
-                        state[q1] = contract_tdds(state[q1], lambda_left, {1}, {1});
+                        absorb_lambda(q1);
                     }
                     if (q2 < num_qubits - 1) {
-                        xarray<cd> right = diag(lambda[q2]);
-                        TDD lambda_right = convert_tensor_to_TDD(right);
-                        state[q2] = contract_tdds(state[q2], lambda_right, {2}, {0});
+                        // right absorption
+                        absorb_lambda(q2, false);
                     }
-                    xarray<cd> bond = diag(lambda[q1]);
-                    TDD lambda_bond = convert_tensor_to_TDD(bond);
-                    state[q1] = contract_tdds(state[q1], lambda_bond, {q1_to_q2_bond_index}, {0});
-
-                    // intermediate seems to have wrong norm, is this due to contractions with lambdas?
-                    // or due to contractions with each other?
-                    temp1 = convert_TDD_to_tensor(state[q1]);
-                    state[q1] = convert_tensor_to_TDD(temp1);
-                    temp2 = convert_TDD_to_tensor(state[q2]);
-                    state[q2] = convert_tensor_to_TDD(temp2);
+                    absorb_lambda(q2);
+                    // auto t2 = std::chrono::high_resolution_clock::now();
+                    // std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+                    // tensor_space_time += ms_double.count();
 
                     // TODO? More efficient method might be to support reshaping of TDDs - not clear how to achieve this
                     // Contract the two parts of the MPS state
-                    TDD intermediate = contract_tdds(state[q1], state[q2], {q1_to_q2_bond_index}, {q2_to_q1_bond_index});
-                    // mab, nbc -> manc
-                    // or have mb, nbc -> mnc
+                    // CAN these two contraction cases be made more efficient?
+                    // auto t1 = std::chrono::high_resolution_clock::now();
+                    // inefficient old setup
+                    // TDD intermediate = contract_tdds(state[q1], state[q2], {q1_to_q2_bond_index}, {1});
+                    // // mab, nbc -> manc
+                    // // or have mb, nbc -> mnc
 
+                    // // Contract intermediate with gate (ijmn) (important thing is to contract over m and n)
+                    // // gate contraction index is the same as the q1_to_q2_bond_index
+                    // TDD theta = contract_tdds(intermediate, gate_TDD, {0, q1_to_q2_bond_index}, {2, 3});
+                    // // manc, ijmn -> ijac
+                    // // mnc, ijmn -> ijc
+                    // // effectively want final output to be iajc or i(1)jc
+                    // // so we need to do reshapes/swapaxes
 
-                    // Contract intermediate with gate (ijmn) (important thing is to contract over m and n)
-                    // gate contraction index is the same as the q1_to_q2_bond_index
-                    TDD theta = contract_tdds(intermediate, gate_TDD, {0, q1_to_q2_bond_index}, {2, 3});
-                    // manc, ijmn -> ijac
-                    // mnc, ijmn -> ijc
-                    // effectively want final output to be iajc or i(1)jc
-                    // so we need to do reshapes/swapaxes
+                    // new, more efficient setup
+                    // auto t1 = std::chrono::high_resolution_clock::now();
+                    TDD intermediate = contract_MPS_tdds(state[q1], state[q2]);
+                    // this gives (mn)ac
+                    // // Contract intermediate with gate (ijmn) (important thing is to contract over m and n)
+                    // // gate contraction index is the same as the q1_to_q2_bond_index
+                    TDD theta = apply_two_qubit_gate(gate, intermediate);
+                    // TDD theta = contract_tdds(gate_TDD, intermediate, {1}, {0});
+                    // auto t2 = std::chrono::high_resolution_clock::now();
+                    // std::chrono::duration<double, std::milli> ms_double = t2 - t1;
+                    // tensor_space_time += ms_double.count();
+                    // (mn)ac , (ij)(mn) -> (ij)ac
 
                     // 2. Convert TDD to tensor for SVD
-
                     xarray<cd> theta_tensor = convert_TDD_to_tensor(theta);
                     // now that it is a tensor, we can apply the necessary reshape/axis swaps to get ibjc
                     // the reshapes handle the case where old_chi1 or old_chi2 is 1 before doing the axis swap
-                    if (q1_to_q2_bond_index == q2_to_q1_bond_index) {
-                        // then ijc, reshape to ij(1)c
-                        theta_tensor.reshape({2, 2, old_chi1, old_chi2});
-                    }
+                    theta_tensor.reshape({2, 2, old_chi1, old_chi2});
                     // swap (1) and j or j and a to get required form
                     theta_tensor = swapaxes(theta_tensor, 1, 2);
 
@@ -416,8 +489,6 @@ class MPS_Circuit : public TDD_Circuit {
                     // Remove smallest schmidt coefficients such that sum of squares is less
                     // than truncation threshold
                     double truncation_threshold = 1e-16;
-                    // TODO s_norm manages to become != 1 at some points for some reason
-                    std::cout << "s_norm: " << std::real(sum(s*s)(0)) << std::endl;
                     uint32_t new_chi = s.size();
                     double sum_squares = 0;
                     for (uint32_t i = new_chi - 1; i > 0; i--) {
@@ -437,13 +508,21 @@ class MPS_Circuit : public TDD_Circuit {
                     if (new_chi > max_chi) {
                         new_chi = max_chi;
                     }
-                    std::cout << "new_chi: " << new_chi << std::endl;
+                    if (new_chi > peak_chi) {
+                        peak_chi = new_chi;
+                    }
+                    // std::cout << "new_chi: " << new_chi << std::endl;
                     xarray<cd> u_prime = view(u, all(), range(0, new_chi));
                     xarray<cd> s_prime = view(s, range(0, new_chi));
                     xarray<cd> v_prime = view(v, range(0, new_chi), all());
 
                     // renormalise s_prime
                     s_prime *= pow( sum(s * s) / sum(s_prime * s_prime), 0.5);
+                    // if s_norm has slipped away from 1 slightly, then renormalise
+                    double root_s_norm = pow(std::real(sum(s_prime*s_prime)(0)), 0.5);
+                    if (std::abs(1 - root_s_norm) > double_error) {
+                        s_prime = s_prime / root_s_norm;
+                    }
 
                     // 5. Calculate new tensors for q1 and q2
                     xarray<cd> q1_prime = u_prime;//linalg::dot(u_prime, diag(s_prime));
@@ -505,6 +584,11 @@ class MPS_Circuit : public TDD_Circuit {
             max_chi = max_bd;
         }
 
+        void print_tensor_space_time() {
+            std::cout << "Time taken converting between forms and in tensor space: " << tensor_space_time << "ms" << std::endl;
+            std::cout << "Max Bond Dimension: " << peak_chi << std::endl;
+        }
+
         void print_mps_state() {
             for (uint32_t i = 0; i < num_qubits; i++) {
                 std::cout << "state for qubit " << i << ": " << std::endl;
@@ -529,7 +613,6 @@ class MPS_Circuit : public TDD_Circuit {
         cd get_amplitude(xarray<size_t> indices) override {
             // these indices should all be 0 or 1 (as they are the physical indices
             // and thus dimension 2)
-            // TODO get_amplitude is not cleaning up some nodes/edges
             TDD amalgam = state[0].get_child_TDD(indices[0]);
             for (size_t i = 1; i < num_qubits; i++) {
                 // always absorb left lambda first
@@ -594,11 +677,13 @@ class MPS_Circuit : public TDD_Circuit {
         // val can be either 0 or 1
         // MORE EFFICIENT METHOD HERE
         // TODO can be extended to support arbitrary expectation values (so long as they are separable)
+
+        //TODO can this be even simpler? Do we even need to contract the full state?
+        // Qiskit implementation seems to suggest we don't
         double get_qubit_probability(uint16_t qubit, uint32_t val) {
             // calculate initial term, contracting from the right
             // TODO investigate whether this is sufficiently efficient (for higher bond dimension its slow)
 
-            // TODO need to absorb lambdas here somewhere
             TDD q_current;
             if (qubit == num_qubits - 1) {
                 q_current = kronecker_conjugate(state[num_qubits - 1].get_child_TDD(val));
@@ -614,8 +699,10 @@ class MPS_Circuit : public TDD_Circuit {
             for (uint32_t j = 0; j < num_qubits - 1; j++) {
                 uint32_t i = num_qubits - 2 - j;
                 TDD q_temp;
+                // old way
                 TDD current_state = state[i];
-                //absorb right lambda into the state, since i will be between 0 and num_qubits - 2
+                // absorb right lambda into the state, since i will be between 0 and num_qubits - 2
+                
                 xarray<cd> right = diag(lambda[i]);
                 TDD lambda_right = convert_tensor_to_TDD(right);
                 // dont delete current_state here as we need to preserve state[q2]
@@ -626,6 +713,8 @@ class MPS_Circuit : public TDD_Circuit {
                 TDD next_state = contract_tdds(current_state, lambda_right, {bond_index}, {0}, 0, false);
                 // but we can cleanup lambda_right here
                 lambda_right.cleanup();
+                // new way
+                // TDD next_state = apply_lambda_right(state[i], lambda[i], 0, false);
                 if (i == qubit) {
                     // then we can index by val
                     q_temp = kronecker_conjugate(next_state.get_child_TDD(val));
@@ -652,19 +741,53 @@ class MPS_Circuit : public TDD_Circuit {
             return probability;
         }
 
-        // TODO deprecate as this is inefficient
-        std::vector<double> get_qubit_probabilities(std::vector<uint16_t> qubits, std::vector<uint32_t> vals) {
-            TDD amalgam = state[0];
-            for (uint16_t i = 1; i < num_qubits; i++) {
-                TDD next_to_contract = state[i];
-                amalgam = contract_tdds(amalgam, next_to_contract, {i}, {1}, 0, false);
+        // TODO experimental, do it in TDD space in future too
+        double get_single_qubit_probability(uint16_t qubit, uint32_t val) {
+            xarray<cd> temp = convert_TDD_to_tensor(state[qubit]);
+            state[qubit] = convert_tensor_to_TDD(temp);
+            if (qubit > 0) {
+                xarray<cd> lambda_left = diag(lambda[qubit - 1]);
+                temp = linalg::tensordot(temp, lambda_left, {1}, {1});
+                temp = swapaxes(temp, {1}, {2});
             }
-            std::vector<double> probabilities;
-            for (uint32_t i = 0; i < qubits.size(); i++) {
-                probabilities.push_back(amalgam.get_probability_sum(qubits[i], vals[i]));
+            if (qubit < num_qubits - 1) {
+                xarray<cd> lambda_right = diag(lambda[qubit]);
+                uint32_t index = 2;
+                if (qubit == 0) {
+                    index = 1;
+                }
+                temp = linalg::tensordot(temp, lambda_right, {index}, {0});
             }
-            return probabilities;
+            temp = view(temp, val, all(), all());
+            temp.reshape({-1});
+            double prob = std::real(sum(temp * conj(temp))(0));
+            return prob;
         }
+
+        // TODO fix this is wrong thanks to issues with apply_lambda_right not suiting this situation
+        // double get_qubit_probability_qiskit_style(uint16_t qubit, uint32_t val) {
+
+        //     TDD temp = state[qubit];
+        //     const TDD_Node *q_root = state[qubit].get_root();
+        //     cd q_weight = state[qubit].get_weight();
+        //     std::vector<size_t> shape = state[qubit].get_shape();
+        //     std::vector<size_t> q_shape(shape.begin() + 1, shape.end());
+        //     if (q_root->get_axis_index() == 0) {
+        //         // then index it
+        //         const TDD_Edge *edge = q_root->get_successor_ref(val);
+        //         q_root = edge->get_target();
+        //         q_weight *= edge->get_weight();
+        //     }
+
+        //     TDD q_state(q_root, q_weight, q_shape);
+        //     if (qubit != num_qubits - 1) {
+        //         q_state = apply_lambda_right(state[qubit], lambda[qubit]);
+        //     }
+            
+        //     xarray<cd> q_tens = convert_TDD_to_tensor(q_state);
+        //     q_tens.reshape({-1});
+        //     return std::real(sum(q_tens * conj(q_tens))(0));
+        // }
 
         uint64_t estimate_memory_usage() {
             // initialise to 64 bits for the two 32 bit integers
